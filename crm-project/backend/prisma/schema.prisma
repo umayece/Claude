@@ -1,0 +1,702 @@
+// MKE A.S. — Kurumsal B2G/B2B/B2C CRM
+// Prisma şeması. Tüm parasal modeller çoklu para birimi + TCMB kuru taşır.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MANAGER
+  SALES
+  SUPPORT
+  VIEWER
+}
+
+enum CompanyType {
+  B2G
+  B2B
+  B2C
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Kimlik, yetki, denetim
+// ---------------------------------------------------------------------------
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  companies Company[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(VIEWER)
+  departmentId String?
+  isActive     Boolean  @default(true)
+
+  phone                     String?
+  avatarUrl                 String?
+  /// ["yedek@mke.gov.tr", "proje@mke.gov.tr"]
+  secondaryEmails           Json?
+  /// {"showTasks": true, "showBirthdays": false, "showTenders": true}
+  calendarFilterPreferences Json?
+
+  // MFA
+  mfaEnabled      Boolean @default(false)
+  mfaSecret       String?
+  /// Tek kullanımlık yedek kodların bcrypt özetleri
+  mfaRecoveryHash Json?
+
+  // Oturum güvenliği: tokenVersion artırıldığında tüm JWT'ler geçersiz olur.
+  tokenVersion         Int       @default(0)
+  failedLoginAttempts  Int       @default(0)
+  lockedUntil          DateTime?
+  passwordChangedAt    DateTime  @default(now())
+  lastLoginAt          DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  department     Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+  ownedCompanies Company[]      @relation("CompanyOwner")
+  ownedDeals     Deal[]         @relation("DealOwner")
+  assignedTasks  Task[]         @relation("TaskAssignee")
+  assignedTickets Ticket[]      @relation("TicketAssignee")
+  activities     Activity[]
+  notes          Note[]
+  emails         EmailQueue[]
+
+  @@index([departmentId])
+  @@index([deletedAt])
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  /// Ham token asla saklanmaz; yalnızca SHA-256 özeti.
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  userAgent String?
+  ip        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Access token kara listesi (logout / zorla çıkış). jti bazlı.
+model RevokedToken {
+  jti       String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  userEmail  String?
+  action     String
+  entityType String
+  entityId   String?
+  /// Değişiklik öncesi/sonrası özet (hassas alanlar maskelenir)
+  changes    Json?
+  ip         String?
+  userAgent  String?
+  statusCode Int?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action])
+}
+
+// ---------------------------------------------------------------------------
+// Coğrafya
+// ---------------------------------------------------------------------------
+
+model City {
+  id        String  @id @default(uuid())
+  name      String  @unique
+  plateCode Int     @unique
+  latitude  Float
+  longitude Float
+  region    String?
+
+  companies Company[]
+
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Şirket & kişi
+// ---------------------------------------------------------------------------
+
+model Company {
+  id           String      @id @default(uuid())
+  name         String
+  type         CompanyType @default(B2B)
+  status       String      @default("Potansiyel")
+  sector       String?
+  website      String?
+  email        String?
+  phone        String?
+  taxNumber    String?
+  taxOffice    String?
+  address      String?
+  cityId       String?
+  districtName String?
+  latitude     Float?
+  longitude    Float?
+  notes        String?
+  ownerId      String?
+  departmentId String?
+  /// Dinamik özel alan verileri: {"fieldKey": value}
+  customFields Json?
+
+  isArchived Boolean   @default(false)
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  city       City?       @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  owner      User?       @relation("CompanyOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  contacts   Contact[]
+  deals      Deal[]
+  offers     Offer[]
+  tenders    Tender[]
+  contracts  Contract[]
+  tasks      Task[]
+  tickets    Ticket[]
+  activities Activity[]
+  emails     EmailQueue[]
+
+  @@index([deletedAt])
+  @@index([name])
+  @@index([type, deletedAt])
+  @@index([status])
+  @@index([cityId])
+  @@index([ownerId])
+  @@index([createdAt])
+  @@index([latitude, longitude])
+}
+
+model Contact {
+  id        String  @id @default(uuid())
+  companyId String
+  firstName String
+  lastName  String
+  title     String?
+  email     String?
+
+  departmentName String?
+  managerName    String?
+  website        String?
+  sector         String?
+  avatarUrl      String?
+  linkedinUrl    String?
+  notes          String?
+
+  /// Esnek doğum tarihi: yalnızca yıl veya yalnızca ay/gün girilebilir.
+  birthYear  Int?
+  birthMonth Int?
+  birthDay   Int?
+
+  isPrimary Boolean   @default(false)
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  phones  ContactPhone[]
+
+  deals      Deal[]
+  offers     Offer[]
+  tasks      Task[]
+  tickets    Ticket[]
+  activities Activity[]
+  emails     EmailQueue[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+  @@index([lastName, firstName])
+  @@index([email])
+  @@index([birthMonth, birthDay])
+}
+
+model ContactPhone {
+  id     String @id @default(uuid())
+  contactId String
+  number String
+  /// Boşluksuz/sembolsüz arama alanı (ör. 905321234567)
+  normalizedNumber String
+  label            String  @default("Cep")
+  isPrimary        Boolean @default(false)
+  isInactive       Boolean @default(false)
+  inactiveReason   String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([normalizedNumber])
+}
+
+// ---------------------------------------------------------------------------
+// Satış süreci
+// ---------------------------------------------------------------------------
+
+model Deal {
+  id        String @id @default(uuid())
+  title     String
+  companyId String
+  contactId String?
+  ownerId   String?
+
+  stage    String  @default("Potansiyel")
+  amount   Float   @default(0)
+  currency String  @default("TRY")
+  /// İşlem anındaki TCMB TL karşılığı
+  exchangeRate Float @default(1.0)
+
+  expectedCloseDate DateTime?
+  description       String?
+  customFields      Json?
+
+  winProbabilityScore Int?
+  lossReason          String?
+  lossDetail          String?
+  closedAt            DateTime?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact    Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  owner      User?      @relation("DealOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  offers     Offer[]
+  tasks      Task[]
+  activities Activity[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+  @@index([stage, deletedAt])
+  @@index([ownerId])
+  @@index([expectedCloseDate])
+  @@index([createdAt])
+}
+
+model Offer {
+  id          String @id @default(uuid())
+  offerNumber String @unique
+  title       String
+  companyId   String
+  contactId   String?
+  dealId      String?
+
+  status   String @default("Taslak")
+  currency String @default("TRY")
+  exchangeRate Float @default(1.0)
+
+  subtotal  Float @default(0)
+  taxTotal  Float @default(0)
+  total     Float @default(0)
+
+  validUntil DateTime?
+  notes      String?
+  terms      String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact   Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal      Deal?       @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  items     OfferItem[]
+  contracts Contract[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+  @@index([status])
+  @@index([dealId])
+}
+
+model OfferItem {
+  id        String  @id @default(uuid())
+  offerId   String
+  productId String?
+
+  name        String
+  description String?
+  quantity    Float  @default(1)
+  unit        String @default("Adet")
+  unitPrice   Float  @default(0)
+  taxRate     Float  @default(20.0)
+  discountRate Float @default(0)
+  lineTotal   Float  @default(0)
+  sortOrder   Int    @default(0)
+
+  offer   Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([offerId])
+  @@index([productId])
+}
+
+model Tender {
+  id           String @id @default(uuid())
+  tenderNumber String @unique
+  title        String
+  companyId    String
+
+  status   String @default("Takipte")
+  method   String?
+  currency String @default("TRY")
+  exchangeRate Float @default(1.0)
+  estimatedValue Float @default(0)
+
+  submissionDeadline DateTime?
+  announcementDate   DateTime?
+  description        String?
+  /// Şartname metni — AI risk analizinin girdisi
+  specificationText  String?
+  customFields       Json?
+
+  winProbabilityScore Int?
+  lossReason          String?
+  lossDetail          String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contracts  Contract[]
+  tasks      Task[]
+  activities Activity[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+  @@index([status, deletedAt])
+  @@index([submissionDeadline])
+}
+
+model Contract {
+  id             String @id @default(uuid())
+  contractNumber String @unique
+  title          String
+  companyId      String
+  offerId        String?
+  tenderId       String?
+
+  status   String @default("Aktif")
+  amount   Float  @default(0)
+  currency String @default("TRY")
+  exchangeRate Float @default(1.0)
+
+  startDate    DateTime?
+  endDate      DateTime?
+  renewalDate  DateTime?
+  description  String?
+  terms        String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company    Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  offer      Offer?             @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  tender     Tender?            @relation(fields: [tenderId], references: [id], onDelete: SetNull)
+  milestones PaymentMilestone[]
+  activities Activity[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+  @@index([status])
+  @@index([endDate])
+  @@index([renewalDate])
+}
+
+model PaymentMilestone {
+  id         String   @id @default(uuid())
+  contractId String
+  title      String
+  amount     Float
+  currency   String   @default("TRY")
+  exchangeRate Float  @default(1.0)
+  dueDate    DateTime
+  status     String   @default("Bekliyor")
+  invoiceNumber String?
+  paidAt     DateTime?
+  note       String?
+  sortOrder  Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@index([status, dueDate])
+  @@index([dueDate])
+}
+
+// ---------------------------------------------------------------------------
+// Ürün / envanter
+// ---------------------------------------------------------------------------
+
+model Product {
+  id            String  @id @default(uuid())
+  sku           String  @unique
+  name          String
+  description   String?
+  category      String
+  unitPrice     Float   @default(0)
+  currency      String  @default("TRY")
+  taxRate       Float   @default(20.0)
+  stockQuantity Int     @default(0)
+  minStockLevel Int     @default(0)
+  unit          String  @default("Adet")
+  isActive      Boolean @default(true)
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  offerItems OfferItem[]
+
+  @@index([deletedAt])
+  @@index([category])
+  @@index([sku])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Satış sonrası destek / garanti
+// ---------------------------------------------------------------------------
+
+model Ticket {
+  id           String  @id @default(uuid())
+  ticketNumber String  @unique
+  title        String
+  description  String
+  priority     String  @default("Orta")
+  status       String  @default("Açık")
+  category     String
+  companyId    String
+  contactId    String?
+  assignedUserId String?
+
+  slaDeadline    DateTime?
+  resolvedAt     DateTime?
+  resolutionNote String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company      Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact      Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  assignedUser User?      @relation("TicketAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  activities   Activity[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+  @@index([status, priority])
+  @@index([assignedUserId])
+  @@index([slaDeadline])
+}
+
+// ---------------------------------------------------------------------------
+// Görev, takvim, notlar
+// ---------------------------------------------------------------------------
+
+model Task {
+  id          String  @id @default(uuid())
+  title       String
+  description String?
+  type        String  @default("Görev")
+  priority    String  @default("Orta")
+  status      String  @default("Açık")
+
+  dueDate   DateTime?
+  /// "09:30"
+  startTime String?
+  /// "11:00"
+  endTime   String?
+  isAllDay  Boolean @default(true)
+
+  companyId      String?
+  contactId      String?
+  dealId         String?
+  tenderId       String?
+  assignedUserId String?
+
+  completedAt DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact      Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal         Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  tender       Tender?  @relation(fields: [tenderId], references: [id], onDelete: SetNull)
+  assignedUser User?    @relation("TaskAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  @@index([deletedAt])
+  @@index([dueDate, status])
+  @@index([assignedUserId, status])
+  @@index([companyId])
+}
+
+model Note {
+  id        String  @id @default(uuid())
+  title     String?
+  body      String
+  color     String  @default("#fef3c7")
+  positionX Int     @default(0)
+  positionY Int     @default(0)
+  isPinned  Boolean @default(false)
+  userId    String
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, deletedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Zaman tüneli (timeline) & e-posta
+// ---------------------------------------------------------------------------
+
+model Activity {
+  id    String  @id @default(uuid())
+  /// NOTE, CALL, EMAIL, WHATSAPP, STAGE_CHANGE, TASK, TICKET, SYSTEM
+  type  String
+  title String
+  body  String?
+
+  companyId  String?
+  contactId  String?
+  dealId     String?
+  tenderId   String?
+  contractId String?
+  ticketId   String?
+  userId     String?
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  company  Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact  Contact?  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  deal     Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  tender   Tender?   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  ticket   Ticket?   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([contactId, createdAt])
+  @@index([dealId, createdAt])
+  @@index([createdAt])
+}
+
+model EmailQueue {
+  id        String  @id @default(uuid())
+  toAddress String
+  ccAddress String?
+  subject   String
+  bodyHtml  String
+  bodyText  String?
+  /// QUEUED, SENT, FAILED — SMTP yokken simülatör doğrudan SENT yazar.
+  status    String  @default("SENT")
+  provider  String  @default("LOCAL_SIMULATOR")
+  errorText String?
+
+  companyId String?
+  contactId String?
+  userId    String?
+
+  sentAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([companyId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Kur önbelleği & dinamik alanlar
+// ---------------------------------------------------------------------------
+
+model ExchangeRateCache {
+  code      String   @id
+  rate      Float
+  source    String   @default("TCMB")
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model CustomFieldDefinition {
+  id          String  @id @default(uuid())
+  /// COMPANY, CONTACT, DEAL, TENDER
+  entityType  String
+  fieldKey    String
+  fieldLabel  String
+  /// TEXT, NUMBER, DATE, SELECT
+  fieldType   String  @default("TEXT")
+  /// SELECT için JSON dizi: ["A","B"]
+  optionsJson String?
+  isRequired  Boolean @default(false)
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([entityType, fieldKey])
+  @@index([entityType, isActive])
+}
