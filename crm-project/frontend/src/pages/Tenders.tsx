@@ -10,6 +10,7 @@ import { Pagination } from '../components/Pagination';
 import { PipelineBar } from '../components/PipelineBar';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
 import { AiAssistant } from '../components/AiAssistant';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import { ScoreBadge, LOSS_REASONS } from './Deals';
 import {
   IconAlert, IconEdit, IconGavel, IconPlus, IconSearch, IconSparkles, IconTrash,
@@ -46,6 +47,7 @@ const EMPTY: FormState = {
 };
 
 export function Tenders() {
+  const confirmDelete = useDeleteConfirm();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
@@ -210,7 +212,7 @@ export function Tenders() {
   };
 
   const remove = async (tender: Tender): Promise<void> => {
-    if (!window.confirm(`"${tender.title}" silinsin mi?`)) return;
+    if (!(await confirmDelete(tender.title, 'İhale çöp kutusuna taşınır.'))) return;
     try {
       await api.delete(`/tenders/${tender.id}`);
       await load();

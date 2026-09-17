@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
 import { IconAlert, IconEdit, IconPlus, IconSearch, IconTrash, IconWrench } from '../components/Icons';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import type { Company, Contact, Paginated, Ticket } from '../types';
 
 const STATUSES = ['Açık', 'İnceleniyor', 'Parça Bekleniyor', 'Çözüldü', 'İptal'] as const;
@@ -42,6 +43,7 @@ function priorityClass(priority: string): string {
 }
 
 export function Tickets() {
+  const confirmDelete = useDeleteConfirm();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -227,7 +229,7 @@ export function Tickets() {
   };
 
   const remove = async (ticket: Ticket): Promise<void> => {
-    if (!window.confirm(`${ticket.ticketNumber} numaralı kayıt silinsin mi?`)) return;
+    if (!(await confirmDelete(`${ticket.ticketNumber} — ${ticket.title}`))) return;
     try {
       await api.delete(`/tickets/${ticket.id}`);
       await load();

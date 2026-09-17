@@ -22,6 +22,9 @@ export const PERMISSIONS = [
   'ai:use',
   'audit:read',
   'user:read', 'user:write',
+  'protocol:read', 'protocol:write', 'protocol:delete',
+  'document:read', 'document:write', 'document:delete',
+  'settings:read', 'settings:write',
   'customfield:read', 'customfield:write',
   'system:backup',
 ] as const;
@@ -31,19 +34,20 @@ export type Permission = (typeof PERMISSIONS)[number];
 const VIEWER: Permission[] = [
   'company:read', 'contact:read', 'deal:read', 'offer:read', 'tender:read',
   'contract:read', 'product:read', 'ticket:read', 'task:read', 'email:read',
-  'customfield:read',
+  'customfield:read', 'protocol:read', 'document:read',
 ];
 
 const SALES: Permission[] = [
   ...VIEWER,
   'company:write', 'contact:write', 'deal:write', 'offer:write',
   'tender:write', 'task:write', 'email:send', 'ai:use', 'ticket:write',
+  'protocol:write', 'document:write',
 ];
 
 const SUPPORT: Permission[] = [
   ...VIEWER,
   'ticket:write', 'ticket:delete', 'task:write', 'contact:write',
-  'email:send', 'ai:use',
+  'email:send', 'ai:use', 'document:write',
 ];
 
 const MANAGER: Permission[] = [
@@ -52,6 +56,7 @@ const MANAGER: Permission[] = [
   'offer:delete', 'tender:delete', 'contract:write', 'contract:delete',
   'product:write', 'product:delete', 'ticket:delete', 'task:delete',
   'audit:read', 'user:read', 'customfield:write',
+  'protocol:delete', 'document:delete',
 ];
 
 const ADMIN: Permission[] = [...PERMISSIONS];

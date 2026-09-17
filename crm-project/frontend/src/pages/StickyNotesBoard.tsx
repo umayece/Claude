@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { IconNote, IconPlus, IconTrash } from '../components/Icons';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import type { StickyNote } from '../types';
 
 const COLORS = ['#fef3c7', '#dcfce7', '#dbeafe', '#fce7f3', '#ede9fe', '#fee2e2'];
 
 export function StickyNotesBoard() {
+  const confirmDelete = useDeleteConfirm();
+  const navigate = useNavigate();
   const [notes, setNotes] = useState<StickyNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [term, setTerm] = useState('');
+  const [kind, setKind] = useState<'all' | 'personal' | 'linked'>('all');
+  const debouncedTerm = useDebounce(term, 350);
   // Not başına bekleyen kaydetme zamanlayıcısı.
   const timers = useRef(new Map<string, number>());
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const response = await api.get<{ data: StickyNote[] }>('/notes', undefined, signal);
+      const response = await api.get<Paginated<StickyNote>>(
+        '/notes', { pageSize: 100, q: debouncedTerm || undefined, kind }, signal,
+      );
       setNotes(response.data);
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
@@ -23,7 +31,7 @@ export function StickyNotesBoard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedTerm, kind]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,7 +84,7 @@ export function StickyNotesBoard() {
   };
 
   const remove = async (id: string): Promise<void> => {
-    if (!window.confirm('Not silinsin mi?')) return;
+    if (!(await confirmDelete('Bu not'))) return;
     // İyimser silme: sunucu hatasında liste yeniden yüklenir.
     setNotes((prev) => prev.filter((note) => note.id !== id));
     try {
@@ -91,7 +99,10 @@ export function StickyNotesBoard() {
       <div className="page-header">
         <div className="page-header-text">
           <h1>Notlarım</h1>
-          <p>Kişisel yapışkan notlar. Yalnızca siz görebilirsiniz.</p>
+          <p>
+            Kişisel yapışkan notlar ve müşteri zaman tünelinden eklediğiniz notlar
+            birlikte listelenir.
+          </p>
         </div>
 
         <div className="page-actions">
@@ -102,6 +113,37 @@ export function StickyNotesBoard() {
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
+
+      <div className="card mb-4">
+        <div className="card-header" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+            <IconSearch
+              size={15}
+              style={{
+                position: 'absolute', left: 11, top: '50%',
+                transform: 'translateY(-50%)', color: 'var(--text-faint)',
+              }}
+            />
+            <input
+              className="input" style={{ paddingLeft: 33 }}
+              placeholder="Not içeriği veya müşteri adı ara…"
+              value={term} onChange={(event) => setTerm(event.target.value)}
+              aria-label="Not ara"
+            />
+          </div>
+
+          <select
+            className="select" style={{ width: 'auto' }}
+            value={kind}
+            onChange={(event) => setKind(event.target.value as 'all' | 'personal' | 'linked')}
+            aria-label="Not türü"
+          >
+            <option value="all">Tüm notlar</option>
+            <option value="personal">Yalnızca kişisel</option>
+            <option value="linked">Yalnızca müşteriye bağlı</option>
+          </select>
+        </div>
+      </div>
 
       {loading && <div className="loading-center"><span className="spinner spinner-lg" /></div>}
 
@@ -140,6 +182,21 @@ export function StickyNotesBoard() {
                 onChange={(event) => update(note.id, { body: event.target.value })}
                 aria-label="Not içeriği"
               />
+
+              {note.company && (
+                <button
+                  type="button"
+                  className="badge badge-info"
+                  style={{
+                    alignSelf: 'flex-start', marginBottom: 6, border: 0,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                  title="Müşteri kartını aç"
+                  onClick={() => navigate(`/companies/${note.companyId}`)}
+                >
+                  <IconBuilding size={10} /> {note.company.name}
+                </button>
+              )}
 
               <div className="sticky-note-bar">
                 {COLORS.map((color) => (

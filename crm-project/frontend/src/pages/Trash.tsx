@@ -3,9 +3,11 @@ import { api } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { Pagination } from '../components/Pagination';
 import { IconAlert, IconArchive, IconRefresh, IconTrash } from '../components/Icons';
+import { useConfirm } from '../components/ConfirmDialog';
 import type { Company, Paginated } from '../types';
 
 export function Trash() {
+  const confirm = useConfirm();
   const { user } = useAuth();
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<Paginated<Company> | null>(null);
@@ -48,11 +50,19 @@ export function Trash() {
   };
 
   const purge = async (company: Company): Promise<void> => {
-    const confirmed = window.confirm(
-      `"${company.name}" KALICI olarak silinecek.\n\n` +
-      'Bu işlem geri alınamaz; kişiler, fırsatlar, teklifler, sözleşmeler ve ' +
-      'destek kayıtları da birlikte silinir. Devam edilsin mi?',
-    );
+    const confirmed = await confirm({
+      title: 'Kalıcı Silme',
+      message: (
+        <>
+          <strong>{company.name}</strong> <u>kalıcı olarak</u> silinecek.
+        </>
+      ),
+      detail:
+        'Bu işlem GERİ ALINAMAZ. Kişiler, fırsatlar, teklifler, sözleşmeler ve ' +
+        'destek kayıtları da birlikte silinir.',
+      confirmLabel: 'Kalıcı Olarak Sil',
+      tone: 'danger',
+    });
     if (!confirmed) return;
 
     setBusyId(company.id);

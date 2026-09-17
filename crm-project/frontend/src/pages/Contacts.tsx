@@ -8,6 +8,7 @@ import { Avatar } from '../components/Avatar';
 import { Pagination } from '../components/Pagination';
 import { ContactDetailModal } from '../components/ContactDetailModal';
 import { IconEdit, IconGift, IconPlus, IconSearch, IconTrash, IconUsers } from '../components/Icons';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import type { Contact, Paginated } from '../types';
 
 const MONTHS = [
@@ -24,6 +25,7 @@ function birthdayText(contact: Contact): string | null {
 }
 
 export function Contacts() {
+  const confirmDelete = useDeleteConfirm();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -84,7 +86,11 @@ export function Contacts() {
   }, [id]);
 
   const remove = async (contact: Contact): Promise<void> => {
-    if (!window.confirm(`"${contact.firstName} ${contact.lastName}" silinsin mi?`)) return;
+    const ok = await confirmDelete(
+      `${contact.firstName} ${contact.lastName}`,
+      'Kişinin telefonları ve ilişkileri de arşivlenir.',
+    );
+    if (!ok) return;
     try {
       await api.delete(`/contacts/${contact.id}`);
       await load();

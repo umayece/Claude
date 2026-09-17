@@ -3,6 +3,8 @@ import { env } from '../lib/env';
 import { prisma } from '../lib/prisma';
 import { BadRequest, NotFound } from '../lib/errors';
 import { toTry } from './currency.service';
+import { answerLocally, type AnswerScope } from './localAnswer.service';
+import { getSetting, SETTING_KEYS } from './settings.service';
 
 export const AI_TASKS = ['COMPANY_SUMMARY', 'TENDER_RISK', 'FREEFORM'] as const;
 export type AiTaskKind = (typeof AI_TASKS)[number];
@@ -22,6 +24,10 @@ export interface AiPreparedPrompt {
   title: string;
   /** Modelin kullandığı bağlamın kaynak özeti (şeffaflık için). */
   contextSummary: string;
+  /** Yerel motorun niyet sınıflandırması için ham kullanıcı sorusu. */
+  rawQuestion?: string;
+  /** Yerel motorun hangi görev için çalıştığı. */
+  task: AiTaskKind;
 }
 
 const SYSTEM_BASE = [
@@ -193,6 +199,7 @@ async function buildCompanyContext(companyId: string): Promise<AiPreparedPrompt>
   return {
     system: TASK_SYSTEM.COMPANY_SUMMARY,
     userMessage: `Aşağıdaki CRM verisine dayanarak şirket geçmişi özeti çıkar.\n\n${lines.join('\n')}`,
+    task: 'COMPANY_SUMMARY',
     title: `${company.name} — Şirket Geçmişi Özeti`,
     contextSummary:
       `${company.contacts.length} kişi, ${company.deals.length} fırsat, ${company.tenders.length} ihale, ` +
@@ -271,6 +278,7 @@ async function buildTenderContext(tenderId: string): Promise<AiPreparedPrompt> {
   return {
     system: TASK_SYSTEM.TENDER_RISK,
     userMessage: `Aşağıdaki ihale için risk analizi çıkar.\n\n${lines.join('\n')}`,
+    task: 'TENDER_RISK',
     title: `${tender.tenderNumber} — Şartname Risk Analizi`,
     contextSummary:
       `${spec.length} karakter şartname, ${history.length} geçmiş ihale, ${tender.tasks.length} açık görev`,
@@ -292,6 +300,8 @@ export async function preparePrompt(request: AiRequest): Promise<AiPreparedPromp
       return {
         system: TASK_SYSTEM.FREEFORM,
         userMessage: question,
+        task: 'FREEFORM',
+        rawQuestion: question,
         title: 'AI Asistan',
         contextSummary: 'serbest soru',
       };
@@ -305,21 +315,38 @@ export async function preparePrompt(request: AiRequest): Promise<AiPreparedPromp
 // Üretim motoru
 // ---------------------------------------------------------------------------
 
+// Anahtar çalışma zamanında değişebildiği için istemci anahtara göre
+// önbelleklenir; anahtar değişince yeni istemci kurulur.
 let client: Anthropic | null = null;
+let clientKey: string | null = null;
 
-function getClient(): Anthropic | null {
-  if (!env.ai.apiKey) return null;
-  client ??= new Anthropic({ apiKey: env.ai.apiKey });
+async function getClient(): Promise<Anthropic | null> {
+  const apiKey = await getSetting(SETTING_KEYS.aiApiKey);
+  if (!apiKey) {
+    client = null;
+    clientKey = null;
+    return null;
+  }
+  if (!client || clientKey !== apiKey) {
+    client = new Anthropic({ apiKey });
+    clientKey = apiKey;
+  }
   return client;
 }
 
-export function isModelConfigured(): boolean {
-  return Boolean(env.ai.apiKey);
+export async function isModelConfigured(): Promise<boolean> {
+  return Boolean(await getSetting(SETTING_KEYS.aiApiKey));
+}
+
+export async function activeModel(): Promise<string> {
+  return (await getSetting(SETTING_KEYS.aiModel)) || env.ai.model;
 }
 
 export interface AiStreamOptions {
   /** İstemci bağlantıyı kapattığında üretimi durdurmak için. */
   signal?: AbortSignal;
+  /** Yerel motorun veritabanı sorgularını kullanıcı kapsamıyla sınırlar. */
+  scope?: AnswerScope;
 }
 
 /**
@@ -333,19 +360,21 @@ export async function* streamCompletion(
   prompt: AiPreparedPrompt,
   options: AiStreamOptions = {},
 ): AsyncGenerator<string, void, void> {
-  const anthropic = getClient();
+  const anthropic = await getClient();
 
   if (!anthropic) {
-    yield* localFallback(prompt);
+    yield* localEngine(prompt, options.scope);
     return;
   }
 
   // NOT: `thinking` parametresi bilinçli olarak gönderilmiyor. Claude Opus 5
   // parametre verilmediğinde adaptif düşünmeyi zaten varsayılan olarak
   // çalıştırır; böylece SDK sürümleri arasında tip uyumsuzluğu riski olmaz.
+  const model = await activeModel();
+
   const stream = anthropic.messages.stream(
     {
-      model: env.ai.model,
+      model,
       // Özet/analiz çıktıları bilinçli olarak kısa tutulur; uzun bir rapor
       // değil, ekranda okunacak bir brifing üretiyoruz.
       max_tokens: 8000,
@@ -382,25 +411,41 @@ export async function* streamCompletion(
 }
 
 /**
- * Yerel kural tabanlı motor: API anahtarı yokken bile ekranda anlamlı,
- * veriye dayalı bir brifing üretir. Hiçbir dış çağrı yapmaz.
+ * Yerel motor: API anahtarı yokken bile ekranda anlamlı, VERİYE DAYALI bir
+ * yanıt üretir. Hiçbir dış çağrı yapmaz.
+ *
+ * Önceki sürüm yalnızca girdi bağlamını geri yazıyordu; artık soru
+ * sınıflandırılıp yanıt doğrudan veritabanından derleniyor.
  */
-async function* localFallback(prompt: AiPreparedPrompt): AsyncGenerator<string, void, void> {
-  const header =
-    '> **Yerel özet motoru** — `ANTHROPIC_API_KEY` tanımlı olmadığı için hiçbir veri dışarıya gönderilmedi. ' +
-    'Aşağıdaki brifing doğrudan CRM kayıtlarından üretildi.\n\n';
+async function* localEngine(
+  prompt: AiPreparedPrompt,
+  scope?: AnswerScope,
+): AsyncGenerator<string, void, void> {
+  const banner =
+    '> **Yerel motor** — AI sağlayıcı anahtarı tanımlı olmadığı için hiçbir veri ' +
+    'dışarıya gönderilmedi. Aşağıdaki yanıt doğrudan CRM veritabanından üretildi. ' +
+    'Serbest metin analizi için Ayarlar → AI Sağlayıcı bölümünden anahtar tanımlayın.\n\n';
 
-  const body = prompt.userMessage
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .join('\n');
+  let text: string;
 
-  const text = `${header}### ${prompt.title}\n\n${body}\n`;
+  if (!scope) {
+    text = `${banner}Yanıt üretilemedi: kullanıcı kapsamı çözülemedi.`;
+  } else if (prompt.task === 'FREEFORM') {
+    text = banner + (await answerLocally(prompt.rawQuestion ?? '', scope));
+  } else {
+    // Şirket özeti / ihale risk analizi: model olmadan yorum üretilemez,
+    // ancak toplanan bağlam yapılandırılmış biçimde sunulabilir.
+    text =
+      `${banner}### ${prompt.title}\n\n` +
+      'Model tabanlı yorum için anahtar gerekir. Aşağıda, analizin dayanacağı ' +
+      `CRM verisi derlenmiş hâliyle listelenmiştir (${prompt.contextSummary}).\n\n` +
+      prompt.userMessage.split('\n').slice(1).join('\n');
+  }
 
   // Akış davranışını taklit et ki istemci tarafı tek kod yolundan ilerlesin.
   const tokens = text.match(/\S+\s*/g) ?? [text];
   for (const token of tokens) {
     yield token;
-    await new Promise((resolve) => setTimeout(resolve, 4));
+    await new Promise((resolve) => setTimeout(resolve, 3));
   }
 }

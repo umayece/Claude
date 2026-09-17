@@ -103,10 +103,13 @@ export function CompanyDetail() {
     if (!id || !noteText.trim()) return;
     setSavingNote(true);
     try {
-      await api.post('/ai/save-to-timeline', {
+      // Not hem kurumun zaman tüneline düşer hem "Notlarım" listesinde
+      // kurum etiketiyle görünür; bu yüzden AI kısayolu yerine /notes ucu
+      // kullanılır (tek kaynak).
+      await api.post('/notes', {
         companyId: id,
         title: 'Not',
-        content: noteText.trim(),
+        body: noteText.trim(),
       });
       setNoteText('');
       setNoteOpen(false);

@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { IconBuilding, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/Icons';
+import { useConfirm } from '../components/ConfirmDialog';
 import type {
   City, Company, CompanyType, CountryOption, CustomFieldDefinition, Paginated,
 } from '../types';
@@ -22,14 +23,24 @@ export const COMPANY_STAGES = [
   'Kaybedildi',
 ] as const;
 
+/** Kısaltmaların açılımı: G2G özellikle açıklama gerektiriyor. */
+export const TYPE_LABELS: Record<string, string> = {
+  B2G: 'Firmadan Kamuya',
+  B2B: 'Firmadan Firmaya',
+  B2C: 'Firmadan Son Kullanıcıya',
+  G2G: 'Devletten Devlete',
+  OTHER: 'Diğer',
+};
+
 const SECTORS = ['Savunma', 'Havacılık', 'Kimya', 'Makine', 'Otomotiv', 'Kamu', 'Diğer'];
-const TYPES: CompanyType[] = ['B2G', 'B2B', 'B2C', 'OTHER'];
+const TYPES: CompanyType[] = ['B2G', 'B2B', 'B2C', 'G2G', 'OTHER'];
 
 export function typeBadgeClass(type: string): string {
   switch (type) {
     case 'B2G': return 'badge badge-b2g';
     case 'B2B': return 'badge badge-b2b';
     case 'B2C': return 'badge badge-b2c';
+    case 'G2G': return 'badge badge-g2g';
     default: return 'badge';
   }
 }
@@ -66,6 +77,7 @@ const EMPTY_FORM: FormState = {
 };
 
 export function Companies() {
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const { can } = useAuth();
 
@@ -248,11 +260,15 @@ export function Companies() {
   };
 
   const remove = async (company: Company): Promise<void> => {
-    const confirmed = window.confirm(
-      `"${company.name}" çöp kutusuna taşınacak.\n\n` +
-      'İlgili kişi, fırsat, teklif ve sözleşmeler de arşivlenir. ' +
-      '30 gün içinde geri yükleyebilirsiniz. Devam edilsin mi?',
-    );
+    const confirmed = await confirm({
+      title: 'Çöp Kutusuna Taşı',
+      message: <><strong>{company.name}</strong> çöp kutusuna taşınacak.</>,
+      detail:
+        'İlgili kişi, fırsat, teklif ve sözleşmeler de arşivlenir. ' +
+        '30 gün içinde geri yükleyebilirsiniz.',
+      confirmLabel: 'Çöp Kutusuna Taşı',
+      tone: 'warning',
+    });
     if (!confirmed) return;
 
     try {
@@ -478,7 +494,9 @@ export function Companies() {
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, type: event.target.value as CompanyType }))}
             >
-              {TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+              {TYPES.map((type) => (
+                <option key={type} value={type}>{type} — {TYPE_LABELS[type]}</option>
+              ))}
             </select>
             <div className="field-hint">Tip sonradan serbestçe değiştirilebilir.</div>
           </div>

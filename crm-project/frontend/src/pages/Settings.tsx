@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, downloadFile } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { useExchangeRates } from '../hooks/useExchangeRates';
@@ -6,9 +6,9 @@ import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
 import {
   IconAlert, IconCheck, IconDownload, IconPlus, IconRefresh,
-  IconShield, IconTrash, IconUpload, IconX,
+  IconShield, IconSparkles, IconTrash, IconUpload, IconX,
 } from '../components/Icons';
-import type { CalendarFilterPreferences } from '../types';
+import type { CalendarFilterPreferences, CurrencyCode, SystemSettingView } from '../types';
 
 const MAX_AVATAR_BYTES = 400 * 1024;
 
@@ -54,6 +54,18 @@ export function Settings() {
   const [mfaBusy, setMfaBusy] = useState(false);
 
   const [backingUp, setBackingUp] = useState(false);
+
+  // --- AI sağlayıcı ayarları ---
+  const [settings, setSettings] = useState<SystemSettingView[]>([]);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [modelInput, setModelInput] = useState('');
+  const [settingBusy, setSettingBusy] = useState(false);
+  const [settingMessage, setSettingMessage] = useState<string | null>(null);
+
+  // --- Elle kur girişi ---
+  const [manualRates, setManualRates] = useState<Record<string, string>>({});
+  const [rateBusy, setRateBusy] = useState(false);
+  const [rateMessage, setRateMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Kullanıcı profili yüklendiğinde form alanlarını doldur.
@@ -203,6 +215,90 @@ export function Settings() {
   };
 
   const isAdmin = user?.role === 'ADMIN';
+
+  const loadSettings = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const response = await api.get<{ data: SystemSettingView[] }>('/system/settings');
+      setSettings(response.data);
+      setModelInput(response.data.find((s) => s.key === 'ai.model')?.value ?? '');
+    } catch {
+      // Ayar listesi alınamazsa panel gizli kalır.
+    }
+  }, [isAdmin]);
+
+  useEffect(() => { void loadSettings(); }, [loadSettings]);
+
+  const saveSetting = async (key: string, value: string): Promise<void> => {
+    setSettingBusy(true);
+    setSettingMessage(null);
+    setError(null);
+    try {
+      await api.put('/system/settings', { key, value });
+      setApiKeyInput('');
+      setSettingMessage('Ayar kaydedildi.');
+      await loadSettings();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ayar kaydedilemedi.');
+    } finally {
+      setSettingBusy(false);
+    }
+  };
+
+  const clearSettingValue = async (key: string): Promise<void> => {
+    setSettingBusy(true);
+    try {
+      await api.delete(`/system/settings/${encodeURIComponent(key)}`);
+      setSettingMessage('Ayar kaldırıldı.');
+      await loadSettings();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ayar kaldırılamadı.');
+    } finally {
+      setSettingBusy(false);
+    }
+  };
+
+  const syncRates = async (): Promise<void> => {
+    setRateBusy(true);
+    setRateMessage(null);
+    try {
+      const response = await api.post<{ success: boolean; message: string }>(
+        '/exchange-rates/sync',
+      );
+      setRateMessage(response.message);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Senkronizasyon başarısız.');
+    } finally {
+      setRateBusy(false);
+    }
+  };
+
+  const saveManualRates = async (): Promise<void> => {
+    const payload = (['USD', 'EUR', 'GBP'] as CurrencyCode[])
+      .map((code) => ({ code, rate: Number(manualRates[code]) }))
+      .filter((item) => Number.isFinite(item.rate) && item.rate > 0);
+
+    if (payload.length === 0) {
+      setError('En az bir geçerli kur girin.');
+      return;
+    }
+
+    setRateBusy(true);
+    setRateMessage(null);
+    try {
+      const response = await api.put<{ message: string }>('/exchange-rates', { rates: payload });
+      setRateMessage(response.message);
+      setManualRates({});
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kurlar kaydedilemedi.');
+    } finally {
+      setRateBusy(false);
+    }
+  };
+
+  const aiKeySetting = settings.find((s) => s.key === 'ai.apiKey');
 
   return (
     <>
@@ -479,11 +575,154 @@ export function Settings() {
                 </div>
               )}
 
-              <button type="button" className="btn btn-sm mt-2" onClick={() => void reload()}>
-                <IconRefresh size={13} /> Yenile
-              </button>
+              {rateMessage && <div className="alert alert-info mt-2">{rateMessage}</div>}
+
+              <div className="flex gap-2 mt-2 flex-wrap">
+                <button type="button" className="btn btn-sm" onClick={() => void reload()}>
+                  <IconRefresh size={13} /> Yenile
+                </button>
+                {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && (
+                  <button
+                    type="button" className="btn btn-sm btn-primary"
+                    onClick={() => void syncRates()}
+                    disabled={rateBusy}
+                  >
+                    {rateBusy && <span className="spinner" />} TCMB'den Çek
+                  </button>
+                )}
+              </div>
+
+              {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && (
+                <>
+                  <h3 className="mt-4 mb-2">Elle Kur Girişi</h3>
+                  <p className="text-xs text-muted mb-2">
+                    TCMB'ye çıkışı olmayan kapalı ağ kurulumlarında kullanın.
+                    Bir sonraki başarılı senkronizasyon bu değerlerin üzerine yazar.
+                  </p>
+
+                  <div className="grid grid-3" style={{ gap: 0, columnGap: 10 }}>
+                    {(['USD', 'EUR', 'GBP'] as CurrencyCode[]).map((code) => (
+                      <div className="field" key={code} style={{ marginBottom: 8 }}>
+                        <label className="field-label" htmlFor={`rate-${code}`}>{code}</label>
+                        <input
+                          id={`rate-${code}`} className="input" type="number"
+                          min={0} step="0.0001"
+                          placeholder={rates[code].toFixed(4)}
+                          value={manualRates[code] ?? ''}
+                          onChange={(event) =>
+                            setManualRates((prev) => ({ ...prev, [code]: event.target.value }))}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button" className="btn btn-sm"
+                    onClick={() => void saveManualRates()}
+                    disabled={rateBusy}
+                  >
+                    Kurları Kaydet
+                  </button>
+                </>
+              )}
             </div>
           </div>
+
+          {isAdmin && (
+            <div className="card">
+              <div className="card-header">
+                <h2><IconSparkles size={16} /> AI Sağlayıcı</h2>
+                <span className={aiKeySetting?.isSet ? 'badge badge-success' : 'badge badge-warning'}>
+                  {aiKeySetting?.isSet ? 'Tanımlı' : 'Tanımsız'}
+                </span>
+              </div>
+
+              <div className="card-body">
+                <div className="alert alert-info">
+                  <IconAlert size={16} />
+                  <span>
+                    Anahtar veritabanında <strong>AES-256-GCM ile şifreli</strong> saklanır ve
+                    API yanıtlarında asla düz metin dönmez. Tanımlı değilken yerel motor
+                    çalışır ve <strong>hiçbir veri dışarı çıkmaz</strong>.
+                  </span>
+                </div>
+
+                {settingMessage && <div className="alert alert-success">{settingMessage}</div>}
+
+                {aiKeySetting?.isSet && (
+                  <div className="spec-list mb-3">
+                    <div className="spec-row">
+                      <span className="spec-key">Mevcut anahtar</span>
+                      <span className="spec-val mono">{aiKeySetting.value}</span>
+                    </div>
+                    <div className="spec-row">
+                      <span className="spec-key">Kaynak</span>
+                      <span className="spec-val">
+                        {aiKeySetting.fromEnvironment ? 'Ortam değişkeni' : 'Veritabanı'}
+                      </span>
+                    </div>
+                    {aiKeySetting.updatedByName && (
+                      <div className="spec-row">
+                        <span className="spec-key">Güncelleyen</span>
+                        <span className="spec-val">{aiKeySetting.updatedByName}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="field">
+                  <label className="field-label" htmlFor="ai-key">API Anahtarı</label>
+                  <input
+                    id="ai-key" className="input mono" type="password"
+                    value={apiKeyInput} placeholder="sk-ant-…"
+                    autoComplete="off"
+                    onChange={(event) => setApiKeyInput(event.target.value)}
+                  />
+                  <div className="field-hint">
+                    Anthropic Claude API anahtarı. Kaydedildikten sonra yalnızca
+                    maskeli önizlemesi görünür.
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="ai-model">Model Kimliği</label>
+                  <input
+                    id="ai-model" className="input mono" value={modelInput}
+                    placeholder="claude-opus-5"
+                    onChange={(event) => setModelInput(event.target.value)}
+                  />
+                </div>
+
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    type="button" className="btn btn-primary"
+                    onClick={() => void saveSetting('ai.apiKey', apiKeyInput.trim())}
+                    disabled={settingBusy || apiKeyInput.trim().length < 10}
+                  >
+                    {settingBusy && <span className="spinner" />} Anahtarı Kaydet
+                  </button>
+
+                  <button
+                    type="button" className="btn"
+                    onClick={() => void saveSetting('ai.model', modelInput.trim())}
+                    disabled={settingBusy || modelInput.trim().length < 3}
+                  >
+                    Modeli Kaydet
+                  </button>
+
+                  {aiKeySetting?.isSet && !aiKeySetting.fromEnvironment && (
+                    <button
+                      type="button" className="btn" style={{ color: 'var(--danger)' }}
+                      onClick={() => void clearSettingValue('ai.apiKey')}
+                      disabled={settingBusy}
+                    >
+                      <IconTrash size={14} /> Anahtarı Kaldır
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {isAdmin && (
             <div className="card">

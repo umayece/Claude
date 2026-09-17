@@ -23,9 +23,14 @@ enum Role {
 }
 
 enum CompanyType {
+  /// Ticari firmadan kamuya
   B2G
+  /// Ticari firmadan firmaya
   B2B
+  /// Ticari firmadan son kullanıcıya
   B2C
+  /// Devletten devlete (hükümetler arası anlaşma)
+  G2G
   OTHER
 }
 
@@ -86,6 +91,11 @@ model User {
   activities     Activity[]
   notes          Note[]
   emails         EmailQueue[]
+  hostedVisits   ProtocolVisit[]      @relation("VisitHost")
+  visitRoles     VisitParticipant[]   @relation("VisitParticipantUser")
+  checklistItems VisitChecklistItem[] @relation("ChecklistAssignee")
+  documents      DocumentFile[]       @relation("DocumentUploader")
+  settings       SystemSetting[]      @relation("SettingEditor")
 
   @@index([departmentId])
   @@index([deletedAt])
@@ -219,6 +229,9 @@ model Company {
   tickets    Ticket[]
   activities Activity[]
   emails     EmailQueue[]
+  notes      Note[]
+  visits     ProtocolVisit[]
+  documents  DocumentFile[]
 
   @@index([deletedAt])
   @@index([name])
@@ -267,6 +280,8 @@ model Contact {
   tickets    Ticket[]
   activities Activity[]
   emails     EmailQueue[]
+  notes      Note[]
+  visitRoles VisitParticipant[]
 
   @@index([companyId])
   @@index([deletedAt])
@@ -330,6 +345,7 @@ model Deal {
   offers     Offer[]
   tasks      Task[]
   activities Activity[]
+  notes      Note[]
 
   @@index([companyId])
   @@index([deletedAt])
@@ -513,6 +529,19 @@ model Product {
   unit          String  @default("Adet")
   isActive      Boolean @default(true)
 
+  // --- Ambalaj / lojistik (koli-palet-konteyner hesabı için) ---
+  /// Tek birimin net ağırlığı (kg)
+  unitWeightKg   Float?
+  /// Bir sandık/kolideki birim adedi
+  caseQuantity   Int?
+  caseLengthCm   Float?
+  caseWidthCm    Float?
+  caseHeightCm   Float?
+  /// Dolu sandığın brüt ağırlığı (kg)
+  caseWeightKg   Float?
+  /// Tehlikeli madde sınıfı (ör. "1.4S") — konteyner planlamasını etkiler
+  hazardClass    String?
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -606,20 +635,30 @@ model Task {
 model Note {
   id        String  @id @default(uuid())
   title     String?
-  body      String
+  body      String  @default("")
   color     String  @default("#fef3c7")
   positionX Int     @default(0)
   positionY Int     @default(0)
   isPinned  Boolean @default(false)
   userId    String
 
+  /// Zaman tünelinden eklenen notlar bir kuruma bağlanır; "Notlarım"
+  /// ekranında kurum etiketiyle listelenir.
+  companyId String?
+  contactId String?
+  dealId    String?
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal    Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([userId, deletedAt])
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -717,4 +756,202 @@ model CustomFieldDefinition {
 
   @@unique([entityType, fieldKey])
   @@index([entityType, isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Sistem ayarları (şifrelenmiş sırlar dahil)
+// ---------------------------------------------------------------------------
+
+/// Çalışma zamanında değiştirilebilen ayarlar. `isSecret` olan kayıtların
+/// `value` alanı AES-256-GCM ile şifreli tutulur ve API'den ASLA düz metin
+/// dönmez; yalnızca maskelenmiş önizleme verilir.
+model SystemSetting {
+  key         String   @id
+  value       String
+  isSecret    Boolean  @default(false)
+  description String?
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  updatedBy User? @relation("SettingEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+// ---------------------------------------------------------------------------
+// Protokol & heyet programı
+// ---------------------------------------------------------------------------
+
+/// Yabancı askerî ataşe ve delegasyon ziyaretleri.
+model ProtocolVisit {
+  id          String   @id @default(uuid())
+  visitCode   String   @unique
+  title       String
+  /// ATAŞE_ZİYARETİ, DELEGASYON, FABRİKA_GEZİSİ, POLİGON_TESTİ, DİĞER
+  visitType   String   @default("DELEGASYON")
+  /// Planlandı, Onay Bekliyor, Devam Ediyor, Tamamlandı, İptal
+  status      String   @default("Planlandı")
+  /// Ziyaretçi heyetin ülkesi
+  country     String
+  countryCode String   @default("TR")
+  companyId   String?
+
+  startDate DateTime
+  endDate   DateTime?
+  location  String?
+  /// Gizlilik derecesi: Tasnif Dışı, Hizmete Özel, Gizli
+  classification String @default("Hizmete Özel")
+
+  summary     String?
+  /// Protokol sorumlusu (MKE tarafı)
+  hostUserId  String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company      Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  host         User?                @relation("VisitHost", fields: [hostUserId], references: [id], onDelete: SetNull)
+  agenda       VisitAgendaItem[]
+  participants VisitParticipant[]
+  checklist    VisitChecklistItem[]
+  documents    DocumentFile[]
+
+  @@index([deletedAt])
+  @@index([startDate])
+  @@index([status, startDate])
+  @@index([countryCode])
+}
+
+/// Saat saat ziyaret akışı.
+model VisitAgendaItem {
+  id      String @id @default(uuid())
+  visitId String
+
+  /// Programın hangi gününe ait olduğu
+  day       DateTime
+  /// "09:30"
+  startTime String
+  endTime   String?
+  title     String
+  /// KARŞILAMA, BRİFİNG, FABRİKA_GEZİSİ, POLİGON_TESTİ, YEMEK, TRANSFER, DİĞER
+  activityType String @default("DİĞER")
+  location  String?
+  /// Bu maddeden sorumlu MKE personeli (serbest metin — dış paydaş olabilir)
+  responsible String?
+  notes     String?
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  visit ProtocolVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId, day, startTime])
+}
+
+/// Hem gelen misafir heyeti hem eşlik eden MKE personeli.
+model VisitParticipant {
+  id      String @id @default(uuid())
+  visitId String
+
+  /// MISAFIR (gelen heyet) veya EV_SAHIBI (eşlik eden MKE personeli)
+  side      String  @default("MISAFIR")
+  fullName  String
+  title     String?
+  rank      String?
+  organization String?
+  nationality  String?
+  passportNo   String?
+  email     String?
+  phone     String?
+
+  /// false ise katılımcı listede ÜSTÜ ÇİZİLİ gösterilir (kayıt silinmez:
+  /// heyet listesi resmî bir belgedir, kimin gelmediği de bilgidir).
+  isAttending   Boolean @default(true)
+  absenceReason String?
+
+  /// CRM'de kayıtlı bir kişiyle eşleşiyorsa bağlanır
+  contactId String?
+  /// MKE personeliyse kullanıcıya bağlanır
+  userId    String?
+
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  visit   ProtocolVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  contact Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  user    User?         @relation("VisitParticipantUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([visitId, side])
+}
+
+/// Karşılama kontrol listesi.
+model VisitChecklistItem {
+  id      String @id @default(uuid())
+  visitId String
+
+  title    String
+  /// HEDİYELİK, ARAÇ, YEMEK, GÜVENLİK, KONAKLAMA, SUNUM, DİĞER
+  category String  @default("DİĞER")
+  isDone   Boolean @default(false)
+  dueDate  DateTime?
+  assignedUserId String?
+  note     String?
+  sortOrder Int    @default(0)
+
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  visit        ProtocolVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  assignedUser User?         @relation("ChecklistAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  @@index([visitId, isDone])
+}
+
+// ---------------------------------------------------------------------------
+// Kurumsal evrak ve pazarlama deposu
+// ---------------------------------------------------------------------------
+
+/// Hem belge deposu hem ziyaret ekleri aynı tabloyu kullanır; `visitId`
+/// doluysa kayıt bir ziyaretin ekidir, boşsa kurumsal depoda durur.
+///
+/// İçerik veritabanında `Bytes` olarak tutulur. Ayrı bir nesne deposu
+/// (S3/MinIO) bağlanana kadar bu, Docker'da ek hacim yapılandırması
+/// gerektirmeyen en basit çalışan çözümdür; boyut sınırı uygulanır.
+model DocumentFile {
+  id       String @id @default(uuid())
+  title    String
+  fileName String
+  mimeType String
+  sizeBytes Int
+  content  Bytes
+
+  /// PAZAR_ANALIZI, ULKE_BRIFINGI, DIPLOMATIK_NOTA, PASAPORT_LISTESI,
+  /// SUNUM, SOZLESME_ORNEGI, TEKNIK_DOKUMAN, DIGER
+  category    String @default("DIGER")
+  description String?
+  /// Tasnif Dışı, Hizmete Özel, Gizli
+  classification String @default("Hizmete Özel")
+  /// Serbest etiketler: ["Katar", "2026", "mühimmat"]
+  tags        Json?
+
+  companyId String?
+  visitId   String?
+  uploadedById String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company    Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  visit      ProtocolVisit? @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  uploadedBy User?          @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([deletedAt])
+  @@index([category])
+  @@index([companyId])
+  @@index([visitId])
+  @@index([createdAt])
 }

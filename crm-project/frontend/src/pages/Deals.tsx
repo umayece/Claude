@@ -9,7 +9,11 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { PipelineBar } from '../components/PipelineBar';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
-import { IconEdit, IconPlus, IconSearch, IconTrash, IconTrending } from '../components/Icons';
+import { DealKanban } from '../components/DealKanban';
+import {
+  IconChart, IconEdit, IconFile, IconPlus, IconSearch, IconTrash, IconTrending,
+} from '../components/Icons';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import type { Company, CurrencyCode, Deal, Paginated } from '../types';
 
 export const DEAL_STAGES = [
@@ -26,6 +30,7 @@ const CURRENCIES: CurrencyCode[] = ['TRY', 'USD', 'EUR', 'GBP'];
 
 /** Skoru renkli rozet olarak gösterir. */
 export function ScoreBadge({ score }: { score: number | null }) {
+  const confirmDelete = useDeleteConfirm();
   if (score === null) return <span className="text-faint">—</span>;
   const cls = score >= 70 ? 'badge badge-success'
     : score >= 40 ? 'badge badge-warning'
@@ -60,6 +65,8 @@ export function Deals() {
   const [term, setTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [scopeFilter, setScopeFilter] = useState<'' | 'domestic' | 'international'>('');
+  // Görünüm tercihi oturumlar arasında hatırlanır.
+  const [view, setView] = useLocalStorage<'table' | 'kanban'>('crm:deals:view', 'kanban');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useLocalStorage('crm:deals:pageSize', 25);
 
@@ -85,7 +92,10 @@ export function Deals() {
       const response = await api.get<Paginated<Deal>>(
         '/deals',
         {
-          page, pageSize,
+          page,
+          // Kanban tüm aşamaları yan yana gösterdiği için daha geniş bir
+          // pencere çeker; tablo görünümü kullanıcının seçtiği boyutta kalır.
+          pageSize: view === 'kanban' ? 200 : pageSize,
           q: debouncedTerm || undefined,
           stage: stageFilter || undefined,
           scope: scopeFilter || undefined,
@@ -99,7 +109,7 @@ export function Deals() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, stageFilter, scopeFilter]);
+  }, [page, pageSize, view, debouncedTerm, stageFilter, scopeFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -210,8 +220,26 @@ export function Deals() {
     await load();
   };
 
+  /**
+   * Fırsattan teklif oluşturur.
+   *
+   * Alanlar teklif ekranına sorgu dizesiyle taşınır; böylece Teklifler
+   * sayfası bağımsız kalır ve fırsat verisi tek kaynaktan (URL) okunur.
+   */
+  const createOffer = (deal: Deal): void => {
+    const params = new URLSearchParams({
+      fromDeal: deal.id,
+      companyId: deal.companyId,
+      title: deal.title,
+      currency: deal.currency,
+      amount: String(deal.amount),
+      ...(deal.contactId ? { contactId: deal.contactId } : {}),
+    });
+    navigate(`/offers?${params.toString()}`);
+  };
+
   const remove = async (deal: Deal): Promise<void> => {
-    if (!window.confirm(`"${deal.title}" silinsin mi?`)) return;
+    if (!(await confirmDelete(deal.title, 'Fırsat çöp kutusuna taşınır.'))) return;
     try {
       await api.delete(`/deals/${deal.id}`);
       await load();
@@ -233,13 +261,30 @@ export function Deals() {
           <p>Aşama takibi, otomatik kazanma skoru ve kayıp analizi.</p>
         </div>
 
-        {can('deal:write') && (
-          <div className="page-actions">
+        <div className="page-actions">
+          <div className="view-toggle" role="group" aria-label="Görünüm">
+            <button
+              type="button"
+              className={view === 'kanban' ? 'active' : ''}
+              onClick={() => setView('kanban')}
+            >
+              <IconChart size={13} /> Kanban
+            </button>
+            <button
+              type="button"
+              className={view === 'table' ? 'active' : ''}
+              onClick={() => setView('table')}
+            >
+              <IconFile size={13} /> Tablo
+            </button>
+          </div>
+
+          {can('deal:write') && (
             <button type="button" className="btn btn-primary" onClick={openCreate}>
               <IconPlus size={15} /> Yeni Fırsat
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -288,7 +333,7 @@ export function Deals() {
           <div className="loading-center"><span className="spinner spinner-lg" /></div>
         )}
 
-        {result && result.data.length === 0 && (
+        {view === 'table' && result && result.data.length === 0 && (
           <div className="empty-state">
             <IconTrending size={42} />
             <h3>Fırsat bulunamadı</h3>
@@ -296,7 +341,7 @@ export function Deals() {
           </div>
         )}
 
-        {result && result.data.length > 0 && (
+        {view === 'table' && result && result.data.length > 0 && (
           <>
             <div className="table-wrap">
               <table className="table">
@@ -378,6 +423,27 @@ export function Deals() {
               onPageSizeChange={setPageSize}
             />
           </>
+        )}
+
+        {view === 'kanban' && result && (
+          <div style={{ padding: 12 }}>
+            <DealKanban
+              deals={result.data}
+              stages={DEAL_STAGES}
+              onStageChange={changeStage}
+              onEdit={openEdit}
+              onDelete={(deal) => void remove(deal)}
+              onCreateOffer={createOffer}
+              canWrite={can('deal:write')}
+              canDelete={can('deal:delete')}
+            />
+            {result.meta.total > result.data.length && (
+              <div className="text-sm text-muted text-center mt-3">
+                {result.data.length} / {result.meta.total} fırsat gösteriliyor.
+                Tümünü görmek için filtreleri daraltın.
+              </div>
+            )}
+          </div>
         )}
       </div>
 

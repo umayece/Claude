@@ -58,9 +58,16 @@ const GROUPS: NavGroup[] = [
     ],
   },
   {
+    title: 'Protokol & Arşiv',
+    items: [
+      { to: '/protocol', label: 'Protokol & Heyet', icon: <IconShield size={17} />, permission: 'protocol:read' },
+      { to: '/documents', label: 'Belge Deposu', icon: <IconArchive size={17} />, permission: 'document:read' },
+    ],
+  },
+  {
     title: 'Akıllı',
     items: [
-      { to: '/ai', label: 'AI Asistan', icon: <IconSparkles size={17} />, permission: 'ai:use' },
+      { to: '/ai', label: 'AI Asistan & Lojistik', icon: <IconSparkles size={17} />, permission: 'ai:use' },
     ],
   },
   {

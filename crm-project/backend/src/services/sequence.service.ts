@@ -7,7 +7,9 @@ import { prisma } from '../lib/prisma';
  * üretmemesi için benzersiz kısıt (schema'daki @unique) son savunmadır;
  * çakışma halinde bir sonraki boşta numara denenir.
  */
-export async function nextSequence(prefix: 'TKL' | 'IHL' | 'SZL' | 'TKT'): Promise<string> {
+export async function nextSequence(
+  prefix: 'TKL' | 'IHL' | 'SZL' | 'TKT' | 'ZYR',
+): Promise<string> {
   const year = new Date().getFullYear();
   const pattern = `${prefix}-${year}-`;
 
@@ -54,6 +56,14 @@ async function findLatest(prefix: string, pattern: string): Promise<number> {
       });
       return parse(row?.contractNumber);
     }
+    case 'ZYR': {
+      const row = await prisma.protocolVisit.findFirst({
+        where: { visitCode: { startsWith: pattern } },
+        orderBy: { visitCode: 'desc' },
+        select: { visitCode: true },
+      });
+      return parse(row?.visitCode);
+    }
     default: {
       const row = await prisma.ticket.findFirst({
         where: { ticketNumber: { startsWith: pattern } },
@@ -73,6 +83,8 @@ async function exists(prefix: string, candidate: string): Promise<boolean> {
       return (await prisma.tender.count({ where: { tenderNumber: candidate } })) > 0;
     case 'SZL':
       return (await prisma.contract.count({ where: { contractNumber: candidate } })) > 0;
+    case 'ZYR':
+      return (await prisma.protocolVisit.count({ where: { visitCode: candidate } })) > 0;
     default:
       return (await prisma.ticket.count({ where: { ticketNumber: candidate } })) > 0;
   }

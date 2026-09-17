@@ -3,7 +3,8 @@ import { api } from '../api/client';
 import { useDebounce } from '../hooks/useDebounce';
 import { AiAssistant, type AiTask } from '../components/AiAssistant';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
-import { IconAlert, IconSparkles } from '../components/Icons';
+import { IconAlert, IconBox, IconSparkles } from '../components/Icons';
+import { LogisticsCalculator } from '../components/LogisticsCalculator';
 import type { Company, Paginated, Tender } from '../types';
 
 interface AiStatus {
@@ -31,7 +32,10 @@ const TASK_OPTIONS: { value: AiTask; label: string; description: string }[] = [
   },
 ];
 
+type PageTab = 'assistant' | 'logistics';
+
 export function AiAssistantPage() {
+  const [pageTab, setPageTab] = useState<PageTab>('assistant');
   const [task, setTask] = useState<AiTask>('COMPANY_SUMMARY');
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [tenderId, setTenderId] = useState<string | null>(null);
@@ -121,7 +125,28 @@ export function AiAssistantPage() {
         </div>
       </div>
 
-      {status && !status.modelConfigured && (
+      <div className="drawer-tabs mb-4" style={{ borderRadius: 'var(--radius-sm)' }}>
+        <button
+          type="button"
+          className={`drawer-tab${pageTab === 'assistant' ? ' active' : ''}`}
+          onClick={() => setPageTab('assistant')}
+        >
+          <IconSparkles size={14} /> AI Asistan
+        </button>
+        <button
+          type="button"
+          className={`drawer-tab${pageTab === 'logistics' ? ' active' : ''}`}
+          onClick={() => setPageTab('logistics')}
+        >
+          <IconBox size={14} /> Koli & Lojistik Hesaplayıcı
+        </button>
+      </div>
+
+      {pageTab === 'logistics' && (
+        <div className="card"><div className="card-body"><LogisticsCalculator /></div></div>
+      )}
+
+      {pageTab === 'assistant' && status && !status.modelConfigured && (
         <div className="alert alert-warning">
           <IconAlert size={16} />
           <div>
@@ -133,6 +158,8 @@ export function AiAssistantPage() {
         </div>
       )}
 
+      {pageTab === 'assistant' && (
+      <>
       <div className="grid grid-2 mb-4">
         <div className="card">
           <div className="card-header"><h2>Analiz Türü</h2></div>
@@ -251,6 +278,8 @@ export function AiAssistantPage() {
           )}
         </div>
       </div>
+      </>
+      )}
     </>
   );
 }

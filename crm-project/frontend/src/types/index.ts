@@ -1,7 +1,7 @@
 /** Backend sözleşmesinin aynası. Rota yanıtları bu tiplerle daraltılır. */
 
 export type Role = 'ADMIN' | 'MANAGER' | 'SALES' | 'SUPPORT' | 'VIEWER';
-export type CompanyType = 'B2G' | 'B2B' | 'B2C' | 'OTHER';
+export type CompanyType = 'B2G' | 'B2B' | 'B2C' | 'G2G' | 'OTHER';
 export type CurrencyCode = 'TRY' | 'USD' | 'EUR' | 'GBP';
 
 export interface Paginated<T> {
@@ -307,6 +307,15 @@ export interface Product {
   isActive: boolean;
   isLowStock?: boolean;
   createdAt: string;
+
+  // Ambalaj / lojistik
+  unitWeightKg?: number | null;
+  caseQuantity?: number | null;
+  caseLengthCm?: number | null;
+  caseWidthCm?: number | null;
+  caseHeightCm?: number | null;
+  caseWeightKg?: number | null;
+  hazardClass?: string | null;
 }
 
 export interface Ticket {
@@ -493,6 +502,154 @@ export interface StickyNote {
   positionX: number;
   positionY: number;
   isPinned: boolean;
+  companyId: string | null;
+  contactId: string | null;
+  dealId: string | null;
   createdAt: string;
   updatedAt: string;
+  company?: { id: string; name: string; type?: CompanyType } | null;
+  contact?: { id: string; firstName: string; lastName: string } | null;
+  deal?: { id: string; title: string } | null;
+  user?: { id: string; name: string; avatarUrl: string | null } | null;
+}
+
+// ---------------------------------------------------------------------------
+// Protokol & heyet programı
+// ---------------------------------------------------------------------------
+
+export interface VisitAgendaItem {
+  id: string;
+  visitId: string;
+  day: string;
+  startTime: string;
+  endTime: string | null;
+  title: string;
+  activityType: string;
+  location: string | null;
+  responsible: string | null;
+  notes: string | null;
+  sortOrder: number;
+}
+
+export interface VisitParticipant {
+  id: string;
+  visitId: string;
+  /** MISAFIR (gelen heyet) veya EV_SAHIBI (eşlik eden MKE personeli) */
+  side: 'MISAFIR' | 'EV_SAHIBI';
+  fullName: string;
+  title: string | null;
+  rank: string | null;
+  organization: string | null;
+  nationality: string | null;
+  passportNo: string | null;
+  email: string | null;
+  phone: string | null;
+  /** false → listede üstü çizili gösterilir, kayıt silinmez. */
+  isAttending: boolean;
+  absenceReason: string | null;
+  contactId: string | null;
+  userId: string | null;
+  sortOrder: number;
+}
+
+export interface VisitChecklistItem {
+  id: string;
+  visitId: string;
+  title: string;
+  category: string;
+  isDone: boolean;
+  dueDate: string | null;
+  assignedUserId: string | null;
+  note: string | null;
+  sortOrder: number;
+  completedAt: string | null;
+}
+
+export interface ProtocolVisit {
+  id: string;
+  visitCode: string;
+  title: string;
+  visitType: string;
+  status: string;
+  country: string;
+  countryCode: string;
+  companyId: string | null;
+  startDate: string;
+  endDate: string | null;
+  location: string | null;
+  classification: string;
+  summary: string | null;
+  hostUserId: string | null;
+  createdAt: string;
+  company?: { id: string; name: string; type?: CompanyType } | null;
+  host?: { id: string; name: string; avatarUrl: string | null } | null;
+  agenda?: VisitAgendaItem[];
+  participants?: VisitParticipant[];
+  checklist?: VisitChecklistItem[];
+  documents?: DocumentFile[];
+  pendingChecklist?: number;
+  daysUntilStart?: number;
+  _count?: { agenda: number; participants: number; checklist: number; documents: number };
+  summaryStats?: {
+    guestCount: number;
+    guestAttending: number;
+    hostCount: number;
+    checklistDone: number;
+    checklistTotal: number;
+    agendaDays: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Belge deposu
+// ---------------------------------------------------------------------------
+
+export interface DocumentFile {
+  id: string;
+  title: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  category: string;
+  description: string | null;
+  classification: string;
+  tags: string[] | null;
+  companyId: string | null;
+  visitId: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  company?: { id: string; name: string } | null;
+  visit?: { id: string; visitCode: string; title: string } | null;
+  uploadedBy?: { id: string; name: string; avatarUrl?: string | null } | null;
+}
+
+// ---------------------------------------------------------------------------
+// Sistem ayarları
+// ---------------------------------------------------------------------------
+
+export interface SystemSettingView {
+  key: string;
+  /** Sırlarda maskelenmiş önizleme, diğerlerinde gerçek değer. */
+  value: string | null;
+  isSecret: boolean;
+  isSet: boolean;
+  description: string | null;
+  updatedAt: string | null;
+  updatedByName: string | null;
+  fromEnvironment: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Lojistik
+// ---------------------------------------------------------------------------
+
+/** Ürün kataloğundaki ambalaj alanları (koli/palet/konteyner hesabı). */
+export interface ProductPackaging {
+  unitWeightKg: number | null;
+  caseQuantity: number | null;
+  caseLengthCm: number | null;
+  caseWidthCm: number | null;
+  caseHeightCm: number | null;
+  caseWeightKg: number | null;
+  hazardClass: string | null;
 }

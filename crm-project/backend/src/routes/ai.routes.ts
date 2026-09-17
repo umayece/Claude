@@ -10,10 +10,10 @@ import { prisma } from '../lib/prisma';
 import { NotFound } from '../lib/errors';
 import { logActivity } from '../services/activity.service';
 import {
-  AI_TASKS, isModelConfigured, preparePrompt, streamCompletion,
+  activeModel, AI_TASKS, isModelConfigured, preparePrompt, streamCompletion,
   type AiTaskKind,
 } from '../services/ai.service';
-import { env } from '../lib/env';
+import { companyScope as scopeFor } from '../middleware/rbac';
 
 const router = Router();
 router.use(authenticate, requireMfaComplete);
@@ -77,9 +77,10 @@ router.get(
   '/status',
   requirePermission('ai:use'),
   asyncHandler(async (_req, res) => {
+    const configured = await isModelConfigured();
     res.json({
-      modelConfigured: isModelConfigured(),
-      model: isModelConfigured() ? env.ai.model : 'local-rule-engine',
+      modelConfigured: configured,
+      model: configured ? await activeModel() : 'local-rule-engine',
       tasks: AI_TASKS,
       streaming: true,
     });
@@ -115,18 +116,25 @@ router.post(
     // İstemci sekmeyi kapatırsa üretimi sürdürmenin anlamı yok.
     req.on('close', () => controller.abort());
 
+    const configured = await isModelConfigured();
+    const modelLabel = configured ? await activeModel() : 'local-rule-engine';
+
     const heartbeat = openSseStream(res);
     let characters = 0;
 
     sse(res, 'meta', {
       title: prompt.title,
       contextSummary: prompt.contextSummary,
-      model: isModelConfigured() ? env.ai.model : 'local-rule-engine',
+      model: modelLabel,
       streamedAt: new Date().toISOString(),
     });
 
     try {
-      for await (const token of streamCompletion(prompt, { signal: controller.signal })) {
+      for await (const token of streamCompletion(prompt, {
+        signal: controller.signal,
+        // Yerel motor sorguları kullanıcının erişim kapsamıyla sınırlanır.
+        scope: { userId: req.user!.id, companyWhere: scopeFor(req.user) },
+      })) {
         characters += token.length;
         sse(res, 'token', { text: token });
       }
@@ -145,7 +153,7 @@ router.post(
       action: `AI_${body.task}`,
       entityType: body.task === 'TENDER_RISK' ? 'Tender' : 'Company',
       entityId: body.entityId ?? null,
-      changes: { characters, model: isModelConfigured() ? env.ai.model : 'local' },
+      changes: { characters, model: modelLabel },
       statusCode: 200,
     });
 
@@ -180,7 +188,11 @@ router.post(
     const prompt = await preparePrompt(body);
 
     let text = '';
-    for await (const token of streamCompletion(prompt)) text += token;
+    for await (const token of streamCompletion(prompt, {
+      scope: { userId: req.user!.id, companyWhere: scopeFor(req.user) },
+    })) {
+      text += token;
+    }
 
     await writeAudit({
       req, action: `AI_${body.task}`,
@@ -190,10 +202,11 @@ router.post(
       statusCode: 200,
     });
 
+    const configured = await isModelConfigured();
     res.json({
       title: prompt.title,
       contextSummary: prompt.contextSummary,
-      model: isModelConfigured() ? env.ai.model : 'local-rule-engine',
+      model: configured ? await activeModel() : 'local-rule-engine',
       text,
     });
   }),

@@ -288,6 +288,14 @@ const COMPANIES: CompanySeed[] = [
   { name: 'Gulf Ordnance Trading FZE', type: 'B2B', status: 'Potansiyel', sector: 'Savunma', cityKey: 'AE:Dubai', owner: 'ihracat@mke.gov.tr',
     freeCity: { name: 'Jebel Ali Free Zone', latitude: 25.0110, longitude: 55.0618 } },
 
+  // --- G2G (devletten devlete / hükümetler arası) ---
+  { name: 'T.C. – Katar Hükümetler Arası Savunma İş Birliği', type: 'G2G', status: 'Müzakere', sector: 'Kamu', cityKey: 'QA:Doha', owner: 'ihracat@mke.gov.tr' },
+  { name: 'T.C. – Azerbaycan Askerî İş Birliği Protokolü', type: 'G2G', status: 'Kazanıldı', sector: 'Kamu', cityKey: 'AZ:Bakü', owner: 'ihracat@mke.gov.tr' },
+  { name: 'T.C. – Pakistan Savunma Sanayii Mutabakatı', type: 'G2G', status: 'Teklif Verildi', sector: 'Kamu', cityKey: 'PK:İslamabad', owner: 'ihracat@mke.gov.tr' },
+  { name: 'T.C. – Somali Eğitim ve Donatım Programı', type: 'G2G', status: 'Devam Ediyor', sector: 'Kamu', cityKey: 'SO:Mogadişu', owner: 'ihracat@mke.gov.tr' },
+  { name: 'T.C. – Libya Askerî Eğitim İş Birliği', type: 'G2G', status: 'İletişime Geçildi', sector: 'Kamu', cityKey: 'LY:Trablus', owner: 'ihracat@mke.gov.tr' },
+  { name: 'T.C. – Kazakistan Savunma Mutabakat Muhtırası', type: 'G2G', status: 'Teklif Hazırlanıyor', sector: 'Kamu', cityKey: 'KZ:Astana', owner: 'ihracat@mke.gov.tr' },
+
   // --- Yurt dışı B2C ---
   { name: 'Berlin Sportschützen Verband', type: 'B2C', status: 'Teklif Verildi', sector: 'Diğer', cityKey: 'DE:Berlin', owner: 'ihracat@mke.gov.tr' },
   { name: 'Baku Shooting Federation', type: 'B2C', status: 'Kazanıldı', sector: 'Diğer', cityKey: 'AZ:Bakü', owner: 'ihracat@mke.gov.tr' },
@@ -464,8 +472,14 @@ async function seedDeals(companyIndex: Map<string, string>): Promise<void> {
         : (['USD', 'EUR', 'USD'] as const)[counter % 3]!;
 
       // Şirketin ana aşaması ilk anlaşmaya yansır; diğerleri çeşitlenir.
+      const DEAL_STAGE_SET = new Set([
+        'Potansiyel', 'İletişime Geçildi', 'Teklif Hazırlanıyor',
+        'Teklif Verildi', 'Müzakere', 'Kazanıldı', 'Kaybedildi',
+      ]);
+      // Şirket durumu her zaman geçerli bir fırsat aşaması değildir
+      // (ör. G2G kayıtlarındaki "Devam Ediyor"); geçersizse müzakereye düşer.
       const stage = i === 0
-        ? company.status
+        ? (DEAL_STAGE_SET.has(company.status) ? company.status : 'Müzakere')
         : pick(['Potansiyel', 'İletişime Geçildi', 'Teklif Verildi', 'Müzakere', 'Kazanıldı'], counter + i);
 
       const baseAmount = company.type === 'B2C'
@@ -568,11 +582,16 @@ async function seedExchangeRates(): Promise<void> {
 
 async function seedProducts(): Promise<void> {
   const products = [
-    { sku: 'MKE-MH-7762', name: '7.62x51 mm NATO Fişek', category: 'Mühimmat', unitPrice: 48.5, unit: 'Adet', stockQuantity: 250_000 },
-    { sku: 'MKE-MH-5556', name: '5.56x45 mm NATO Fişek', category: 'Mühimmat', unitPrice: 32.0, unit: 'Adet', stockQuantity: 480_000 },
-    { sku: 'MKE-AS-120M', name: '120 mm Tank Mühimmatı', category: 'Ağır Silah', unitPrice: 185_000, unit: 'Adet', stockQuantity: 420 },
-    { sku: 'MKE-YP-0431', name: 'Namlu Yedek Parça Seti', category: 'Yedek Parça', unitPrice: 12_400, unit: 'Koli', stockQuantity: 75 },
-    { sku: 'MKE-KM-TNT1', name: 'Endüstriyel Patlayıcı Hammadde', category: 'Kimyasal', unitPrice: 890, unit: 'Kg', stockQuantity: 12_000 },
+    { sku: 'MKE-MH-7762', name: '7.62x51 mm NATO Fişek', category: 'Mühimmat', unitPrice: 48.5, unit: 'Adet', stockQuantity: 250_000,
+      unitWeightKg: 0.024, caseQuantity: 1200, caseLengthCm: 48, caseWidthCm: 32, caseHeightCm: 22, caseWeightKg: 34.5, hazardClass: '1.4S' },
+    { sku: 'MKE-MH-5556', name: '5.56x45 mm NATO Fişek', category: 'Mühimmat', unitPrice: 32.0, unit: 'Adet', stockQuantity: 480_000,
+      unitWeightKg: 0.012, caseQuantity: 1600, caseLengthCm: 46, caseWidthCm: 30, caseHeightCm: 20, caseWeightKg: 25.8, hazardClass: '1.4S' },
+    { sku: 'MKE-AS-120M', name: '120 mm Tank Mühimmatı', category: 'Ağır Silah', unitPrice: 185_000, unit: 'Adet', stockQuantity: 420,
+      unitWeightKg: 21.5, caseQuantity: 2, caseLengthCm: 110, caseWidthCm: 40, caseHeightCm: 35, caseWeightKg: 52.0, hazardClass: '1.1E' },
+    { sku: 'MKE-YP-0431', name: 'Namlu Yedek Parça Seti', category: 'Yedek Parça', unitPrice: 12_400, unit: 'Koli', stockQuantity: 75,
+      unitWeightKg: 18.0, caseQuantity: 1, caseLengthCm: 120, caseWidthCm: 35, caseHeightCm: 30, caseWeightKg: 19.5 },
+    { sku: 'MKE-KM-TNT1', name: 'Endüstriyel Patlayıcı Hammadde', category: 'Kimyasal', unitPrice: 890, unit: 'Kg', stockQuantity: 12_000,
+      unitWeightKg: 1.0, caseQuantity: 25, caseLengthCm: 40, caseWidthCm: 30, caseHeightCm: 28, caseWeightKg: 26.5, hazardClass: '1.1D' },
     { sku: 'MKE-HZ-BAKIM', name: 'Periyodik Bakım Hizmeti', category: 'Hizmet', unitPrice: 4_500, unit: 'Saat', stockQuantity: 0 },
   ];
 
@@ -607,6 +626,164 @@ async function seedCustomFields(): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
+async function seedProtocolVisits(
+  companyIndex: Map<string, string>,
+  userIndex: Map<string, string>,
+): Promise<void> {
+  if ((await prisma.protocolVisit.count()) > 0) {
+    console.log('✔ Protokol ziyaretleri zaten mevcut, atlandı.');
+    return;
+  }
+
+  const host = userIndex.get('ihracat@mke.gov.tr') ?? null;
+  const day = (offset: number): Date => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + offset);
+    return d;
+  };
+
+  const visits = [
+    {
+      code: 'ZYR-2026-0001',
+      title: 'Katar Savunma Bakanlığı Heyet Ziyareti',
+      visitType: 'DELEGASYON', status: 'Planlandı',
+      country: 'Katar', countryCode: 'QA',
+      company: 'Qatar Armed Forces Procurement',
+      start: day(12), end: day(14),
+      location: 'MKE Kırıkkale Fabrikası',
+      classification: 'Hizmete Özel',
+      summary: '6 kişilik teknik heyet; 7.62 mm hat gezisi ve poligon atış testi.',
+    },
+    {
+      code: 'ZYR-2026-0002',
+      title: 'Azerbaycan Askerî Ataşe Nezaket Ziyareti',
+      visitType: 'ATAŞE_ZİYARETİ', status: 'Onay Bekliyor',
+      country: 'Azerbaycan', countryCode: 'AZ',
+      company: 'Azerbaycan Savunma Sanayii Bakanlığı',
+      start: day(26), end: day(26),
+      location: 'MKE Genel Müdürlük, Ankara',
+      classification: 'Tasnif Dışı',
+      summary: 'Ataşe ve refakatçi; brifing ve öğle yemeği.',
+    },
+    {
+      code: 'ZYR-2026-0003',
+      title: 'Pakistan POF Teknik İnceleme Programı',
+      visitType: 'FABRİKA_GEZİSİ', status: 'Tamamlandı',
+      country: 'Pakistan', countryCode: 'PK',
+      company: 'Pakistan Ordnance Factories Board',
+      start: day(-21), end: day(-19),
+      location: 'MKE Elmadağ Tesisi',
+      classification: 'Gizli',
+      summary: 'Ortak üretim fizibilitesi kapsamında 3 günlük teknik inceleme.',
+    },
+  ];
+
+  const AGENDA: Record<string, [string, string, string, string, string][]> = {
+    'ZYR-2026-0001': [
+      ['09:00', '09:45', 'Havalimanı karşılama ve transfer', 'KARŞILAMA', 'Esenboğa Havalimanı'],
+      ['10:30', '11:30', 'Genel Müdür makam ziyareti ve brifing', 'BRİFİNG', 'Genel Müdürlük'],
+      ['12:00', '13:30', 'Öğle yemeği', 'YEMEK', 'MKE Sosyal Tesis'],
+      ['14:00', '16:30', '7.62 mm üretim hattı gezisi', 'FABRİKA_GEZİSİ', 'Kırıkkale Fabrikası'],
+      ['09:30', '12:00', 'Poligon atış testi', 'POLİGON_TESTİ', 'Kırıkkale Atış Poligonu'],
+    ],
+    'ZYR-2026-0002': [
+      ['10:00', '10:30', 'Karşılama ve protokol', 'KARŞILAMA', 'Genel Müdürlük Giriş'],
+      ['10:30', '11:30', 'İş birliği brifingi', 'BRİFİNG', 'Toplantı Salonu A'],
+      ['12:00', '13:30', 'Öğle yemeği', 'YEMEK', 'MKE Sosyal Tesis'],
+    ],
+  };
+
+  const PARTICIPANTS: Record<string, [string, string, string, string, boolean][]> = {
+    'ZYR-2026-0001': [
+      ['MISAFIR', 'Khalid Al-Mansouri', 'Tuğgeneral', 'Katar Silahlı Kuvvetleri', true],
+      ['MISAFIR', 'Omar Al-Thani', 'Binbaşı', 'Tedarik Dairesi', true],
+      ['MISAFIR', 'Rashid Al-Kuwari', 'Teknik Uzman', 'Barzan Holdings', false],
+      ['EV_SAHIBI', 'Satış Müdürü', 'Müdür', 'MKE A.Ş.', true],
+      ['EV_SAHIBI', 'İhracat Uzmanı', 'Uzman', 'MKE A.Ş.', true],
+    ],
+    'ZYR-2026-0002': [
+      ['MISAFIR', 'Elçin Məmmədov', 'Albay / Askerî Ataşe', 'Azerbaycan Büyükelçiliği', true],
+      ['EV_SAHIBI', 'İhracat Uzmanı', 'Uzman', 'MKE A.Ş.', true],
+    ],
+    'ZYR-2026-0003': [
+      ['MISAFIR', 'Imran Shah', 'Direktör', 'Pakistan Ordnance Factories', true],
+      ['MISAFIR', 'Ayesha Khan', 'Kalite Müdürü', 'Pakistan Ordnance Factories', true],
+      ['EV_SAHIBI', 'Satış Müdürü', 'Müdür', 'MKE A.Ş.', true],
+    ],
+  };
+
+  const CHECKLIST: [string, string][] = [
+    ['Hediyelikler hazırlandı', 'HEDİYELİK'],
+    ['Araç tahsisi ve şoför görevlendirmesi', 'ARAÇ'],
+    ['VIP yemek rezervasyonu', 'YEMEK'],
+    ['Tesis güvenlik izinleri alındı', 'GÜVENLİK'],
+    ['Misafir pasaport/kimlik listesi teslim alındı', 'GÜVENLİK'],
+    ['Konaklama rezervasyonu', 'KONAKLAMA'],
+    ['Brifing sunumu hazırlandı', 'SUNUM'],
+    ['Tercüman görevlendirmesi', 'DİĞER'],
+  ];
+
+  for (const [index, v] of visits.entries()) {
+    const visit = await prisma.protocolVisit.create({
+      data: {
+        visitCode: v.code,
+        title: v.title,
+        visitType: v.visitType,
+        status: v.status,
+        country: v.country,
+        countryCode: v.countryCode,
+        companyId: companyIndex.get(v.company) ?? null,
+        startDate: v.start,
+        endDate: v.end,
+        location: v.location,
+        classification: v.classification,
+        summary: v.summary,
+        hostUserId: host,
+      },
+    });
+
+    const agenda = AGENDA[v.code] ?? [];
+    for (const [i, [startTime, endTime, title, activityType, location]] of agenda.entries()) {
+      await prisma.visitAgendaItem.create({
+        data: {
+          visitId: visit.id,
+          // Son madde ikinci güne taşınır (çok günlü program örneği).
+          day: i === agenda.length - 1 && v.end && v.end > v.start ? v.end : v.start,
+          startTime, endTime, title, activityType, location, sortOrder: i,
+        },
+      });
+    }
+
+    for (const [i, [side, fullName, rank, organization, isAttending]]
+      of (PARTICIPANTS[v.code] ?? []).entries()) {
+      await prisma.visitParticipant.create({
+        data: {
+          visitId: visit.id, side, fullName, rank, organization,
+          nationality: side === 'MISAFIR' ? v.country : 'Türkiye',
+          isAttending,
+          absenceReason: isAttending ? null : 'Vize işlemleri tamamlanamadı',
+          sortOrder: i,
+        },
+      });
+    }
+
+    await prisma.visitChecklistItem.createMany({
+      data: CHECKLIST.map(([title, category], i) => ({
+        visitId: visit.id,
+        title,
+        category,
+        // Tamamlanmış ziyaretin listesi dolu, planlananınki kısmen dolu.
+        isDone: v.status === 'Tamamlandı' ? true : i < 3 - index,
+        completedAt: v.status === 'Tamamlandı' || i < 3 - index ? new Date() : null,
+        sortOrder: i,
+      })),
+    });
+  }
+
+  console.log(`✔ ${visits.length} protokol ziyareti yüklendi (program, katılımcı, kontrol listesi ile).`);
+}
+
 async function main(): Promise<void> {
   console.log('MKE CRM tohum verisi yükleniyor...\n');
 
@@ -622,6 +799,7 @@ async function main(): Promise<void> {
   await seedContacts(companyIndex);
   await seedDeals(companyIndex);
   await seedTenders(companyIndex);
+  await seedProtocolVisits(companyIndex, userIndex);
 
   console.log('\n✅ Tamamlandı.');
 }

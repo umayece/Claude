@@ -6,6 +6,7 @@ import { useExchangeRates } from '../hooks/useExchangeRates';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
+import { useConfirm } from '../components/ConfirmDialog';
 import {
   IconAlert, IconBox, IconEdit, IconPlus, IconSearch, IconTrash, IconUpload,
 } from '../components/Icons';
@@ -41,6 +42,7 @@ interface ImportSummary {
 }
 
 export function Products() {
+  const confirm = useConfirm();
   const { can } = useAuth();
   const { format } = useExchangeRates();
 
@@ -156,7 +158,14 @@ export function Products() {
   };
 
   const remove = async (product: Product): Promise<void> => {
-    if (!window.confirm(`"${product.name}" (${product.sku}) pasifleştirilsin mi?`)) return;
+    const ok = await confirm({
+      title: 'Ürünü Pasifleştir',
+      message: <><strong>{product.name}</strong> ({product.sku}) pasifleştirilsin mi?</>,
+      detail: 'Ürün tekliflerde seçilemez hale gelir; geçmiş kayıtlar korunur.',
+      confirmLabel: 'Pasifleştir',
+      tone: 'warning',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/products/${product.id}`);
       await load();

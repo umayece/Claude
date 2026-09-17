@@ -39,9 +39,10 @@ npm run dev                     # http://localhost:5173
 ```
 
 Tohum verisi 81 il + 56 uluslararası şehir koordinatını, 5 departmanı,
-6 kullanıcıyı, 45 şirketi (yurt içi + yurt dışı; B2G/B2B/B2C dengeli),
+6 kullanıcıyı, 51 şirketi (yurt içi + yurt dışı; B2G/B2B/B2C/G2G dengeli),
 bunlara bağlı kişileri, satış fırsatlarını ve ihaleleri, ürün kataloğunu ve
-özel alan tanımlarını yükler — harita ilk açılışta dolu gelir.
+özel alan tanımlarını, ambalaj/lojistik verilerini ve 3 protokol ziyaretini
+(program, katılımcı ve kontrol listesiyle) yükler — harita ilk açılışta dolu gelir.
 Geliştirme şifresi: `MkeCrm!2026` (ör. `admin@mke.gov.tr`).
 
 ---
@@ -155,7 +156,9 @@ daha önce ayrıca silinmiş kayıtlar çöp kutusunda kalır.
 | Operasyon | `/products` (+ `/import-csv`), `/tickets`, `/tasks` (+ `/overdue`, `/:id/complete`), `/calendar` |
 | İletişim | `/email/send`, `/email/outbox` — yerel simülatör |
 | Akıllı | `/ai/stream` (SSE), `/ai/generate`, `/ai/status`, `/ai/save-to-timeline` |
-| Sistem | `/exchange-rates`, `/audit-logs`, `/custom-fields`, `/dashboard`, `/users`, `/notes`, `/system/backup` |
+| Protokol | `/protocol-visits` (+ `/:id/agenda`, `/:id/participants`, `/:id/checklist`) |
+| Arşiv | `/documents` (+ `/:id/download`, `/stats`) |
+| Sistem | `/exchange-rates` (+ `/sync`, elle `PUT`), `/audit-logs`, `/custom-fields`, `/dashboard`, `/users`, `/notes`, `/system/backup`, `/system/settings` |
 
 ### AI akışı (SSE)
 
@@ -179,6 +182,50 @@ sonra oluşan hata `event: error` karesi olarak iletilir.
 
 `ANTHROPIC_API_KEY` tanımlı değilse **hiçbir veri dışarı çıkmaz**; yerel
 kural tabanlı motor CRM kayıtlarından brifing üretir.
+
+### Protokol & Heyet Programı
+
+Yabancı askerî ataşe ve delegasyon ziyaretleri için ayrı bir modül:
+saat saat **ziyaret akış programı**, **katılımcı yönetimi** (misafir heyet +
+eşlik eden MKE personeli), **karşılama kontrol listesi** ve **evrak ekleri**.
+
+Katılımcı listesinde gelmeyen kişi **silinmez, üstü çizilir**: heyet listesi
+resmî bir belgedir ve kimin gelmediği de bilgidir.
+
+### Belge deposu
+
+Pazar analiz raporları, ülke brifingleri ve kurumsal evrak arşivi.
+Dosya içeriği veritabanında `Bytes` olarak tutulur (7 MB üst sınır) —
+ayrı bir nesne deposu bağlanana kadar Docker'da ek hacim yapılandırması
+gerektirmeyen en basit çalışan çözüm. Kabul edilen türler beyaz listede
+tutulur; indirme her zaman `Content-Disposition: attachment` ile yapılır ve
+**gizlilik dereceli evrakın kim tarafından indirildiği denetim kaydına yazılır**.
+
+### AI sağlayıcı ve yerel motor
+
+`ANTHROPIC_API_KEY` tanımlı değilken devreye giren yerel motor **artık
+veritabanını sorgular**: "bu haftaki etkinlikler", "toplam fırsatlar",
+"gecikmiş görevler", "kritik stok", "kayıp nedenleri", "yaklaşan ziyaretler"
+gibi soruları niyet sınıflandırmasıyla tanıyıp gerçek kayıtlardan yanıtlar.
+Bir niyet tanınmazsa bunu açıkça söyler ve neleri yanıtlayabildiğini
+listeler — uydurma yapmaz.
+
+API anahtarı **Ayarlar → AI Sağlayıcı** bölümünden girilebilir; veritabanında
+AES-256-GCM ile şifreli saklanır ve API yanıtlarında asla düz metin dönmez
+(yalnızca maskelenmiş önizleme). Sunucuyu yeniden başlatmak gerekmez.
+
+### Döviz kuru: donmuş vs. güncel
+
+Parasal kayıtlar yazıldıkları andaki kuru `exchangeRate` alanında
+**dondurur** — kur hareketi geçmiş tutarı kaydırmaz. Bu, ekranın "kur yanlış
+hesaplanıyor" izlenimi vermesinin nedenidir: gösterilen TL değeri kayıt
+anındaki kurdur. `dualAmount()` yardımcısı ikisini birlikte üretir:
+muhasebe değeri (donmuş kur) ve bugünkü piyasa değeri (güncel kur), USD
+karşılığıyla birlikte.
+
+TCMB'ye erişimi olmayan kurulumlar için **elle kur girişi** vardır
+(`PUT /api/v1/exchange-rates`, Ayarlar ekranından). Kaynak `MANUEL` olarak
+işaretlenir; bir sonraki başarılı senkronizasyon üzerine yazar.
 
 ### Uluslararası lokasyon desteği
 

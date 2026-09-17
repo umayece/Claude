@@ -6,6 +6,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useDebounce } from '../hooks/useDebounce';
 import { Modal } from '../components/Modal';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import {
   IconCalendar, IconCheck, IconChevronLeft, IconChevronRight, IconClock,
   IconEdit, IconGavel, IconGift, IconMail, IconPlus, IconCredit, IconTrash,
@@ -112,6 +113,7 @@ const EMPTY_TASK: TaskForm = {
 };
 
 export function TasksCalendar() {
+  const confirmDelete = useDeleteConfirm();
   const navigate = useNavigate();
   const { can } = useAuth();
   const [searchParams] = useSearchParams();
@@ -327,7 +329,7 @@ export function TasksCalendar() {
   };
 
   const deleteTask = async (taskId: string): Promise<void> => {
-    if (!window.confirm('Görev silinsin mi?')) return;
+    if (!(await confirmDelete('Bu görev'))) return;
     try {
       await api.delete(`/tasks/${taskId}`);
       setSelectedDay(null);

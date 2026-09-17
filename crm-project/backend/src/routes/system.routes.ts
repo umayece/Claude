@@ -2,12 +2,18 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, requireMfaComplete } from '../middleware/auth';
-import { requireRole } from '../middleware/rbac';
-import { requirePermission } from '../middleware/rbac';
+import { requirePermission, requireRole } from '../middleware/rbac';
 import { backupLimiter } from '../middleware/rateLimit';
 import { writeAudit } from '../middleware/audit';
 import { env } from '../lib/env';
+import { NotFound } from '../lib/errors';
 import { getRates } from '../services/currency.service';
+import { z } from 'zod';
+import { validate } from '../middleware/validate';
+import { auditAction } from '../middleware/audit';
+import {
+  clearSetting, listSettings, setSetting, SETTING_KEYS, type SettingKey,
+} from '../services/settings.service';
 
 const router = Router();
 router.use(authenticate, requireMfaComplete);
@@ -176,6 +182,72 @@ router.get(
       companies, trashedCompanies, contacts, deals, tenders,
       contracts, products, tickets, tasks, auditLogs,
     });
+  }),
+);
+
+
+// ---------------------------------------------------------------------------
+// Çalışma zamanı ayarları (AI sağlayıcı anahtarı vb.)
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/system/settings
+ * Sır niteliğindeki değerler ASLA düz metin dönmez; yalnızca maskelenmiş
+ * önizleme ve "tanımlı mı" bilgisi verilir.
+ */
+router.get(
+  '/settings',
+  requireRole('ADMIN'),
+  requirePermission('settings:read'),
+  asyncHandler(async (_req, res) => {
+    res.json({ data: await listSettings() });
+  }),
+);
+
+const settingSchema = z.object({
+  key: z.enum([
+    SETTING_KEYS.aiApiKey,
+    SETTING_KEYS.aiModel,
+    SETTING_KEYS.aiProvider,
+  ]),
+  value: z.string().trim().min(1, 'Değer boş olamaz.').max(500),
+});
+
+/** PUT /api/v1/system/settings */
+router.put(
+  '/settings',
+  requireRole('ADMIN'),
+  requirePermission('settings:write'),
+  validate(settingSchema),
+  // Denetim kaydında değer maskelenir (`redact` hassas anahtarları yakalar);
+  // burada ayrıca yalnızca anahtar adı bağlam olarak yazılır.
+  auditAction('SETTING_UPDATE', 'SystemSetting'),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof settingSchema>;
+    req.auditContext = {
+      entityType: 'SystemSetting',
+      entityId: body.key,
+      changes: { key: body.key, value: '[REDACTED]' },
+    };
+
+    await setSetting(body.key as SettingKey, body.value, req.user!.id);
+    res.json({ success: true, data: await listSettings() });
+  }),
+);
+
+/** DELETE /api/v1/system/settings/:key — ayarı kaldırır (ortam değişkenine düşer). */
+router.delete(
+  '/settings/:key',
+  requireRole('ADMIN'),
+  requirePermission('settings:write'),
+  auditAction('SETTING_CLEAR', 'SystemSetting'),
+  asyncHandler(async (req, res) => {
+    const key = String(req.params.key);
+    const valid = Object.values(SETTING_KEYS) as string[];
+    if (!valid.includes(key)) throw NotFound('Ayar bulunamadı.');
+
+    await clearSetting(key as SettingKey);
+    res.json({ success: true, data: await listSettings() });
   }),
 );
 

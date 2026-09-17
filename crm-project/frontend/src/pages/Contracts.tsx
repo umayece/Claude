@@ -9,6 +9,8 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
 import { SplitDrawer, SpecRow } from '../components/SplitDrawer';
+import { printCorporateDocument } from '../utils/corporatePrint';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import {
   IconCredit, IconDownload, IconEdit, IconFile, IconPlus, IconSearch, IconTrash,
 } from '../components/Icons';
@@ -54,6 +56,7 @@ const EMPTY_MILESTONE: MilestoneForm = {
 };
 
 export function Contracts() {
+  const confirmDelete = useDeleteConfirm();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
@@ -212,7 +215,8 @@ export function Contracts() {
   };
 
   const remove = async (contract: Contract): Promise<void> => {
-    if (!window.confirm(`"${contract.title}" sözleşmesi silinsin mi?`)) return;
+    const ok = await confirmDelete(contract.title, 'Bağlı hakediş kayıtları da silinir.');
+    if (!ok) return;
     try {
       await api.delete(`/contracts/${contract.id}`);
       setDetail(null);
@@ -248,7 +252,8 @@ export function Contracts() {
   };
 
   const removeMilestone = async (milestone: PaymentMilestone): Promise<void> => {
-    if (!detail || !window.confirm(`"${milestone.title}" hakedişi silinsin mi?`)) return;
+    if (!detail) return;
+    if (!(await confirmDelete(milestone.title, 'Hakediş kaydı kalıcı olarak silinir.'))) return;
     try {
       await api.delete(`/contracts/${detail.id}/milestones/${milestone.id}`);
       await openDetail(detail.id);
@@ -258,103 +263,98 @@ export function Contracts() {
   };
 
   /**
-   * Resmî PDF çıktısı.
+   * Resmî PDF çıktısı — MKE kurumsal antetli şablon.
    *
-   * Sunucu tarafında PDF üretmek yerine tarayıcının yazdırma motoru
-   * kullanılır: ek bağımlılık yoktur ve kullanıcı "PDF olarak kaydet"
-   * seçeneğiyle aynı çıktıyı alır. İçerik `textContent` ile yazılır,
-   * böylece sözleşme metnindeki HTML yorumlanmaz.
+   * Şablon `corporatePrint` modülünde tutulur; teklif ve sözleşme aynı
+   * antet, taraflar tablosu ve kaşe/imza düzenini paylaşır.
    */
   const printContract = (contract: Contract): void => {
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) {
-      setError('Açılır pencere engellendi. Tarayıcı ayarlarından izin verin.');
-      return;
-    }
+    const milestones = contract.milestones ?? [];
 
-    const doc = win.document;
-    doc.title = `${contract.contractNumber} — ${contract.title}`;
+    const ok = printCorporateDocument({
+      documentType: 'SÖZLEŞME',
+      documentNumber: contract.contractNumber,
+      title: contract.title,
+      classification: 'Hizmete Özel',
+      parties: [
+        {
+          label: 'Yüklenici (Satıcı)',
+          name: 'MKE A.Ş.',
+          lines: [
+            'Makina ve Kimya Endüstrisi Anonim Şirketi',
+            'Tandoğan, Ankara / Türkiye',
+            'Vergi Dairesi: Başkent V.D.',
+          ],
+        },
+        {
+          label: 'İdare / Müşteri',
+          name: contract.company?.name ?? '—',
+          lines: [
+            contract.company?.name ? 'Sözleşme tarafı' : '',
+            contract.tender ? `İlgili ihale: ${contract.tender.tenderNumber}` : '',
+            contract.offer ? `İlgili teklif: ${contract.offer.offerNumber}` : '',
+          ].filter(Boolean),
+        },
+      ],
+      sections: [
+        {
+          heading: 'Sözleşme Künyesi',
+          rows: [
+            ['Sözleşme No', contract.contractNumber],
+            ['Konu', contract.title],
+            ['Durum', contract.status],
+            ['Sözleşme Bedeli', `${contract.amount.toLocaleString('tr-TR')} ${contract.currency}`],
+            ['TL Karşılığı (kayıt kuru)',
+              `${Math.round(contract.amountTry ?? contract.amount * contract.exchangeRate)
+                .toLocaleString('tr-TR')} ₺`],
+            ['Başlangıç Tarihi',
+              contract.startDate ? new Date(contract.startDate).toLocaleDateString('tr-TR') : '—'],
+            ['Bitiş Tarihi',
+              contract.endDate ? new Date(contract.endDate).toLocaleDateString('tr-TR') : '—'],
+            ['Yenileme Tarihi',
+              contract.renewalDate ? new Date(contract.renewalDate).toLocaleDateString('tr-TR') : '—'],
+          ],
+        },
+        ...(contract.description
+          ? [{ heading: 'Sözleşmenin Konusu', paragraphs: [contract.description] }]
+          : []),
+        ...(milestones.length
+          ? [{
+              heading: 'Ödeme Planı (Hakedişler)',
+              table: {
+                headers: ['Hakediş', 'Tutar', 'Vade', 'Durum', 'Fatura No'],
+                align: ['left', 'right', 'left', 'left', 'left'] as ('left' | 'right')[],
+                rows: milestones.map((m) => [
+                  m.title,
+                  `${m.amount.toLocaleString('tr-TR')} ${m.currency}`,
+                  new Date(m.dueDate).toLocaleDateString('tr-TR'),
+                  m.effectiveStatus ?? m.status,
+                  m.invoiceNumber ?? '—',
+                ]),
+              },
+            }]
+          : []),
+        {
+          heading: 'Genel Hükümler',
+          paragraphs: [
+            contract.terms?.trim() ||
+              'Taraflar, işbu sözleşmede yer alan hükümleri eksiksiz yerine getirmeyi ' +
+              'kabul ve taahhüt eder. Teslimat, muayene ve kabul işlemleri sözleşme ' +
+              'eki teknik şartname hükümlerine göre yürütülür. Ödemeler, ödeme planında ' +
+              'belirtilen hakediş takvimine uygun olarak gerçekleştirilir.',
+            'İşbu sözleşmeden doğabilecek uyuşmazlıklarda Ankara Mahkemeleri ve ' +
+            'İcra Daireleri yetkilidir.',
+          ],
+        },
+      ],
+      signatures: [
+        { label: 'MKE A.Ş.', name: 'Yetkili İmza' },
+        { label: contract.company?.name ?? 'İdare / Müşteri', name: 'Yetkili İmza' },
+      ],
+      footerNote: 'MKE A.Ş. · Makina ve Kimya Endüstrisi A.Ş. — Hizmete Özel',
+    });
 
-    const style = doc.createElement('style');
-    style.textContent = `
-      body { font-family: Arial, sans-serif; color: #0f172a; padding: 40px; line-height: 1.6; }
-      h1 { font-size: 20px; border-bottom: 2px solid #0a192f; padding-bottom: 8px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
-      th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; font-size: 13px; }
-      th { background: #f1f5f9; }
-      .meta { margin-top: 14px; font-size: 13px; }
-      .meta div { margin-bottom: 4px; }
-      footer { margin-top: 36px; font-size: 11px; color: #64748b; }
-    `;
-    doc.head.appendChild(style);
-
-    const heading = doc.createElement('h1');
-    heading.textContent = `${contract.contractNumber} — ${contract.title}`;
-    doc.body.appendChild(heading);
-
-    const meta = doc.createElement('div');
-    meta.className = 'meta';
-    const rows: [string, string][] = [
-      ['Müşteri', contract.company?.name ?? '—'],
-      ['Durum', contract.status],
-      ['Tutar', `${contract.amount.toLocaleString('tr-TR')} ${contract.currency}`],
-      ['Başlangıç', contract.startDate ? new Date(contract.startDate).toLocaleDateString('tr-TR') : '—'],
-      ['Bitiş', contract.endDate ? new Date(contract.endDate).toLocaleDateString('tr-TR') : '—'],
-      ['Yenileme', contract.renewalDate ? new Date(contract.renewalDate).toLocaleDateString('tr-TR') : '—'],
-    ];
-    for (const [key, value] of rows) {
-      const line = doc.createElement('div');
-      line.textContent = `${key}: ${value}`;
-      meta.appendChild(line);
-    }
-    doc.body.appendChild(meta);
-
-    if (contract.description) {
-      const description = doc.createElement('p');
-      description.textContent = contract.description;
-      doc.body.appendChild(description);
-    }
-
-    if (contract.milestones && contract.milestones.length > 0) {
-      const table = doc.createElement('table');
-      const thead = doc.createElement('thead');
-      const headRow = doc.createElement('tr');
-      for (const label of ['Hakediş', 'Tutar', 'Vade', 'Durum', 'Fatura No']) {
-        const th = doc.createElement('th');
-        th.textContent = label;
-        headRow.appendChild(th);
-      }
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-
-      const tbody = doc.createElement('tbody');
-      for (const milestone of contract.milestones) {
-        const tr = doc.createElement('tr');
-        const values = [
-          milestone.title,
-          `${milestone.amount.toLocaleString('tr-TR')} ${milestone.currency}`,
-          new Date(milestone.dueDate).toLocaleDateString('tr-TR'),
-          milestone.effectiveStatus ?? milestone.status,
-          milestone.invoiceNumber ?? '—',
-        ];
-        for (const value of values) {
-          const td = doc.createElement('td');
-          td.textContent = value;
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      doc.body.appendChild(table);
-    }
-
-    const footer = doc.createElement('footer');
-    footer.textContent =
-      `MKE A.Ş. CRM · ${new Date().toLocaleString('tr-TR')} tarihinde oluşturuldu.`;
-    doc.body.appendChild(footer);
-
-    win.focus();
-    win.print();
+    if (!ok) setError('Açılır pencere engellendi. Tarayıcı ayarlarından izin verin.');
   };
 
   const closeDetail = (): void => {

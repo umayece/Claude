@@ -21,6 +21,8 @@ import { Settings } from './pages/Settings';
 import { Trash } from './pages/Trash';
 import { EmailOutbox } from './pages/EmailOutbox';
 import { StickyNotesBoard } from './pages/StickyNotesBoard';
+import { Protocol } from './pages/Protocol';
+import { Documents } from './pages/Documents';
 
 function FullPageLoader() {
   return (
@@ -69,6 +71,9 @@ export function App() {
         <Route path="tickets/:id" element={<Tickets />} />
         <Route path="tasks" element={<TasksCalendar />} />
         <Route path="notes" element={<StickyNotesBoard />} />
+        <Route path="protocol" element={<Protocol />} />
+        <Route path="protocol/:id" element={<Protocol />} />
+        <Route path="documents" element={<Documents />} />
         <Route path="outbox" element={<EmailOutbox />} />
         <Route path="ai" element={<AiAssistantPage />} />
         <Route path="trash" element={<Trash />} />

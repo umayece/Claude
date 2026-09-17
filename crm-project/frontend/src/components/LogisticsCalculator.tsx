@@ -1,0 +1,405 @@
+import { useEffect, useMemo, useState } from 'react';
+import { api } from '../api/client';
+import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
+import { IconAlert, IconBox } from './Icons';
+import type { Paginated, Product } from '../types';
+
+/**
+ * Koli / palet / konteyner hesaplayıcı.
+ *
+ * Hesap iki ayrı sınırı birlikte gözetir: HACİM ve AĞIRLIK. Mühimmat
+ * sevkiyatında belirleyici olan genellikle ağırlıktır (konteyner hacmi
+ * dolmadan yük sınırına ulaşılır); yalnızca hacme bakan bir hesap
+ * gerçekte taşınamayacak bir plan üretir. Bu yüzden iki sonuçtan
+ * BÜYÜK olanı gerekli konteyner sayısını belirler.
+ */
+
+interface ContainerSpec {
+  code: string;
+  label: string;
+  /** Kullanılabilir iç hacim (m³) */
+  volumeM3: number;
+  /** Azami yük (kg) */
+  payloadKg: number;
+  /** Standart palet kapasitesi (Euro palet) */
+  palletCapacity: number;
+}
+
+const CONTAINERS: ContainerSpec[] = [
+  { code: '20FT', label: "20' Standart Konteyner", volumeM3: 33.2, payloadKg: 28_200, palletCapacity: 11 },
+  { code: '40FT', label: "40' Standart Konteyner", volumeM3: 67.7, payloadKg: 26_700, palletCapacity: 24 },
+  { code: '40HC', label: "40' High Cube Konteyner", volumeM3: 76.4, payloadKg: 26_500, palletCapacity: 24 },
+];
+
+// Euro palet: 120 x 80 cm, istifleme yüksekliği 180 cm kabul edilir.
+const PALLET = { lengthCm: 120, widthCm: 80, maxHeightCm: 180, tareKg: 25 };
+
+interface Row {
+  key: string;
+  productId: string | null;
+  name: string;
+  quantity: string;
+  /** Bir sandıktaki birim adedi */
+  caseQuantity: string;
+  caseLengthCm: string;
+  caseWidthCm: string;
+  caseHeightCm: string;
+  caseWeightKg: string;
+  hazardClass: string | null;
+}
+
+function emptyRow(index: number): Row {
+  return {
+    key: `row-${Date.now()}-${index}`,
+    productId: null, name: '', quantity: '1000',
+    caseQuantity: '1000', caseLengthCm: '40', caseWidthCm: '30',
+    caseHeightCm: '25', caseWeightKg: '20', hazardClass: null,
+  };
+}
+
+export function LogisticsCalculator() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [rows, setRows] = useState<Row[]>([emptyRow(0)]);
+  const [containerCode, setContainerCode] = useState('20FT');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await api.get<Paginated<Product>>(
+          '/products', { pageSize: 200, isActive: true }, controller.signal,
+        );
+        setProducts(response.data);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
+        setError('Ürün kataloğu yüklenemedi; değerleri elle girebilirsiniz.');
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
+  const productOptions: SelectOption[] = useMemo(
+    () => products.map((product) => ({
+      value: product.id,
+      label: `${product.sku} — ${product.name}`,
+      description: product.caseQuantity
+        ? `${product.caseQuantity} ${product.unit} / sandık · ${product.caseWeightKg ?? '?'} kg`
+        : 'Ambalaj bilgisi tanımsız',
+    })),
+    [products],
+  );
+
+  const update = (key: string, patch: Partial<Row>): void => {
+    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  };
+
+  /** Katalogdan seçim ambalaj alanlarını doldurur. */
+  const applyProduct = (key: string, productId: string | null): void => {
+    const product = products.find((p) => p.id === productId);
+    if (!product) {
+      update(key, { productId: null });
+      return;
+    }
+    update(key, {
+      productId,
+      name: product.name,
+      caseQuantity: product.caseQuantity ? String(product.caseQuantity) : '1',
+      caseLengthCm: product.caseLengthCm ? String(product.caseLengthCm) : '40',
+      caseWidthCm: product.caseWidthCm ? String(product.caseWidthCm) : '30',
+      caseHeightCm: product.caseHeightCm ? String(product.caseHeightCm) : '25',
+      caseWeightKg: product.caseWeightKg ? String(product.caseWeightKg) : '20',
+      hazardClass: product.hazardClass ?? null,
+    });
+  };
+
+  const container = CONTAINERS.find((c) => c.code === containerCode) ?? CONTAINERS[0]!;
+
+  const result = useMemo(() => {
+    let totalCases = 0;
+    let totalVolumeM3 = 0;
+    let totalWeightKg = 0;
+    const hazards = new Set<string>();
+
+    for (const row of rows) {
+      const quantity = Number(row.quantity) || 0;
+      const perCase = Number(row.caseQuantity) || 0;
+      if (quantity <= 0 || perCase <= 0) continue;
+
+      // Kısmi sandık da bir sandık yer kaplar.
+      const cases = Math.ceil(quantity / perCase);
+      const caseVolumeM3 =
+        ((Number(row.caseLengthCm) || 0) *
+         (Number(row.caseWidthCm) || 0) *
+         (Number(row.caseHeightCm) || 0)) / 1_000_000;
+
+      totalCases += cases;
+      totalVolumeM3 += cases * caseVolumeM3;
+      totalWeightKg += cases * (Number(row.caseWeightKg) || 0);
+      if (row.hazardClass) hazards.add(row.hazardClass);
+    }
+
+    // Palet: taban alanına kaç sandık sığdığı × istif kat sayısı.
+    let palletCount = 0;
+    for (const row of rows) {
+      const quantity = Number(row.quantity) || 0;
+      const perCase = Number(row.caseQuantity) || 0;
+      const length = Number(row.caseLengthCm) || 0;
+      const width = Number(row.caseWidthCm) || 0;
+      const height = Number(row.caseHeightCm) || 0;
+      if (quantity <= 0 || perCase <= 0 || length <= 0 || width <= 0 || height <= 0) continue;
+
+      const cases = Math.ceil(quantity / perCase);
+      // Sandığı iki yönde de deneyip daha verimli yerleşimi seçeriz.
+      const perLayer = Math.max(
+        Math.floor(PALLET.lengthCm / length) * Math.floor(PALLET.widthCm / width),
+        Math.floor(PALLET.lengthCm / width) * Math.floor(PALLET.widthCm / length),
+      );
+      const layers = Math.floor(PALLET.maxHeightCm / height);
+      const perPallet = Math.max(1, perLayer * layers);
+      palletCount += Math.ceil(cases / perPallet);
+    }
+
+    const palletTareKg = palletCount * PALLET.tareKg;
+    const grossWeightKg = totalWeightKg + palletTareKg;
+
+    // İki sınır ayrı hesaplanır; belirleyici olan BÜYÜK olandır.
+    const byVolume = totalVolumeM3 > 0 ? Math.ceil(totalVolumeM3 / container.volumeM3) : 0;
+    const byWeight = grossWeightKg > 0 ? Math.ceil(grossWeightKg / container.payloadKg) : 0;
+    const byPallet = palletCount > 0 ? Math.ceil(palletCount / container.palletCapacity) : 0;
+    const containersNeeded = Math.max(byVolume, byWeight, byPallet);
+
+    const limiting =
+      containersNeeded === 0 ? 'yok'
+        : byWeight >= byVolume && byWeight >= byPallet ? 'ağırlık'
+        : byVolume >= byPallet ? 'hacim'
+        : 'palet alanı';
+
+    const volumeFill = containersNeeded > 0
+      ? (totalVolumeM3 / (containersNeeded * container.volumeM3)) * 100 : 0;
+    const weightFill = containersNeeded > 0
+      ? (grossWeightKg / (containersNeeded * container.payloadKg)) * 100 : 0;
+
+    return {
+      totalCases, totalVolumeM3, totalWeightKg, palletCount, palletTareKg,
+      grossWeightKg, byVolume, byWeight, byPallet, containersNeeded, limiting,
+      volumeFill, weightFill, hazards: [...hazards],
+    };
+  }, [rows, container]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2><IconBox size={17} /> Koli & Lojistik Hesaplayıcı</h2>
+          <p className="text-sm text-muted" style={{ margin: '3px 0 0' }}>
+            Sandık, palet ve konteyner ihtiyacını hacim ve ağırlık sınırlarını
+            birlikte gözeterek hesaplar.
+          </p>
+        </div>
+
+        <select
+          className="select" style={{ width: 'auto' }}
+          value={containerCode}
+          onChange={(event) => setContainerCode(event.target.value)}
+          aria-label="Konteyner tipi"
+        >
+          {CONTAINERS.map((option) => (
+            <option key={option.code} value={option.code}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {error && <div className="alert alert-warning">{error}</div>}
+
+      {rows.map((row, index) => (
+        <div
+          key={row.key}
+          className="card"
+          style={{ padding: 12, marginBottom: 10, background: 'var(--surface-alt)' }}
+        >
+          <div className="grid grid-2" style={{ gap: 0, columnGap: 12 }}>
+            <div className="field" style={{ marginBottom: 10 }}>
+              <label className="field-label">Ürün (katalogdan)</label>
+              <SearchableSelect
+                options={productOptions}
+                value={row.productId}
+                onChange={(value) => applyProduct(row.key, value)}
+                placeholder="Ürün seçin veya elle girin…"
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: 10 }}>
+              <label className="field-label">Toplam Miktar (adet/kg)</label>
+              <input
+                className="input" type="number" min={0} value={row.quantity}
+                onChange={(event) => update(row.key, { quantity: event.target.value })}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr)) auto',
+              gap: 10, alignItems: 'end',
+            }}
+          >
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">Sandık/Koli</label>
+              <input
+                className="input" type="number" min={1} value={row.caseQuantity}
+                onChange={(event) => update(row.key, { caseQuantity: event.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">Uzunluk cm</label>
+              <input
+                className="input" type="number" min={1} value={row.caseLengthCm}
+                onChange={(event) => update(row.key, { caseLengthCm: event.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">Genişlik cm</label>
+              <input
+                className="input" type="number" min={1} value={row.caseWidthCm}
+                onChange={(event) => update(row.key, { caseWidthCm: event.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">Yükseklik cm</label>
+              <input
+                className="input" type="number" min={1} value={row.caseHeightCm}
+                onChange={(event) => update(row.key, { caseHeightCm: event.target.value })}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">Brüt kg</label>
+              <input
+                className="input" type="number" min={0} step="0.1" value={row.caseWeightKg}
+                onChange={(event) => update(row.key, { caseWeightKg: event.target.value })}
+              />
+            </div>
+
+            <button
+              type="button" className="btn btn-ghost btn-icon"
+              style={{ color: 'var(--danger)' }}
+              aria-label="Satırı sil"
+              disabled={rows.length === 1}
+              onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
+            >
+              ✕
+            </button>
+          </div>
+
+          {row.hazardClass && (
+            <div className="text-xs mt-2" style={{ color: 'var(--danger)' }}>
+              <IconAlert size={11} /> Tehlikeli madde sınıfı: <strong>{row.hazardClass}</strong>
+            </div>
+          )}
+
+          <div className="text-xs text-muted mt-1">Kalem {index + 1}</div>
+        </div>
+      ))}
+
+      <button
+        type="button" className="btn btn-sm mb-4"
+        onClick={() => setRows((prev) => [...prev, emptyRow(prev.length)])}
+      >
+        + Kalem Ekle
+      </button>
+
+      <h3 className="mb-2">Sonuç</h3>
+      <div className="calc-result mb-3">
+        <div className="calc-tile">
+          <div className="calc-tile-label">Sandık / Koli</div>
+          <div className="calc-tile-value">{result.totalCases.toLocaleString('tr-TR')}</div>
+        </div>
+        <div className="calc-tile">
+          <div className="calc-tile-label">Palet</div>
+          <div className="calc-tile-value">{result.palletCount.toLocaleString('tr-TR')}</div>
+          <div className="calc-tile-sub">120×80 cm, {PALLET.maxHeightCm} cm istif</div>
+        </div>
+        <div className="calc-tile">
+          <div className="calc-tile-label">Hacim</div>
+          <div className="calc-tile-value">{result.totalVolumeM3.toFixed(2)}</div>
+          <div className="calc-tile-sub">m³</div>
+        </div>
+        <div className="calc-tile">
+          <div className="calc-tile-label">Brüt Ağırlık</div>
+          <div className="calc-tile-value">
+            {Math.round(result.grossWeightKg).toLocaleString('tr-TR')}
+          </div>
+          <div className="calc-tile-sub">
+            kg (palet darası {Math.round(result.palletTareKg)} kg dahil)
+          </div>
+        </div>
+        <div className="calc-tile" style={{ borderColor: 'var(--mke-accent-dim)' }}>
+          <div className="calc-tile-label">Konteyner</div>
+          <div className="calc-tile-value" style={{ color: 'var(--mke-navy)' }}>
+            {result.containersNeeded}
+          </div>
+          <div className="calc-tile-sub">{container.label}</div>
+        </div>
+      </div>
+
+      {result.containersNeeded > 0 && (
+        <>
+          <div className="mb-2">
+            <div className="flex items-center justify-between text-sm mb-1">
+              <span>Hacim doluluğu</span>
+              <strong>%{Math.round(result.volumeFill)}</strong>
+            </div>
+            <div className="container-bar">
+              <div
+                className="container-fill"
+                style={{ width: `${Math.min(100, result.volumeFill)}%` }}
+              />
+              <div className="container-label">
+                {result.totalVolumeM3.toFixed(1)} / {(result.containersNeeded * container.volumeM3).toFixed(1)} m³
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <div className="flex items-center justify-between text-sm mb-1">
+              <span>Ağırlık doluluğu</span>
+              <strong>%{Math.round(result.weightFill)}</strong>
+            </div>
+            <div className="container-bar">
+              <div
+                className="container-fill"
+                style={{ width: `${Math.min(100, result.weightFill)}%` }}
+              />
+              <div className="container-label">
+                {Math.round(result.grossWeightKg).toLocaleString('tr-TR')} /{' '}
+                {(result.containersNeeded * container.payloadKg).toLocaleString('tr-TR')} kg
+              </div>
+            </div>
+          </div>
+
+          <div className="alert alert-info">
+            <IconAlert size={16} />
+            <div>
+              Belirleyici kısıt: <strong>{result.limiting}</strong>.
+              {' '}Hacme göre {result.byVolume}, ağırlığa göre {result.byWeight},
+              {' '}palet alanına göre {result.byPallet} konteyner gerekiyor;
+              {' '}en büyüğü esas alındı.
+            </div>
+          </div>
+        </>
+      )}
+
+      {result.hazards.length > 0 && (
+        <div className="alert alert-warning">
+          <IconAlert size={16} />
+          <div>
+            <strong>Tehlikeli madde sınıfı:</strong> {result.hazards.join(', ')}.
+            {' '}IMDG/ADR ayrıştırma kuralları gereği bu yükler ayrı konteynerde
+            taşınmak zorunda olabilir; hesap bunu dikkate almaz — nakliyeciye danışın.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
