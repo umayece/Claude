@@ -323,8 +323,10 @@ model Deal {
   stage    String  @default("Potansiyel")
   amount   Float   @default(0)
   currency String  @default("TRY")
-  /// İşlem anındaki TCMB TL karşılığı
-  exchangeRate Float @default(1.0)
+  /// Kayıt anındaki kur — YALNIZCA denetim/iz amaçlı saklanır.
+  /// Fırsat değerlemesi listelerde ANLIK kurla yapılır (bkz. currency.service).
+  /// `@map` ile mevcut sütun adı korunur: veri kaybı olmadan yeniden adlandırma.
+  exchangeRateAtCreation Float? @map("exchangeRate")
 
   expectedCloseDate DateTime?
   description       String?
@@ -365,7 +367,9 @@ model Offer {
 
   status   String @default("Taslak")
   currency String @default("TRY")
-  exchangeRate Float @default(1.0)
+  /// Teklif resmiyet kazandığında (Gönderildi/Kabul) dondurulan kur.
+  /// Taslak tekliflerde değerleme anlık kurla yapılır.
+  exchangeRateAtCreation Float? @map("exchangeRate")
 
   subtotal  Float @default(0)
   taxTotal  Float @default(0)
@@ -422,7 +426,8 @@ model Tender {
   status   String @default("Takipte")
   method   String?
   currency String @default("TRY")
-  exchangeRate Float @default(1.0)
+  /// Denetim izi; ihale değerlemesi anlık kurla yapılır.
+  exchangeRateAtCreation Float? @map("exchangeRate")
   estimatedValue Float @default(0)
 
   submissionDeadline DateTime?
@@ -462,7 +467,9 @@ model Contract {
   status   String @default("Aktif")
   amount   Float  @default(0)
   currency String @default("TRY")
-  exchangeRate Float @default(1.0)
+  /// Sözleşme/imza tarihindeki kur. Detayda "İmza tarihindeki değeri" ile
+  /// "güncel piyasa değeri" birlikte gösterilir.
+  exchangeRateAtCreation Float? @map("exchangeRate")
 
   startDate    DateTime?
   endDate      DateTime?
@@ -493,7 +500,8 @@ model PaymentMilestone {
   title      String
   amount     Float
   currency   String   @default("TRY")
-  exchangeRate Float  @default(1.0)
+  /// Hakediş, bağlı olduğu sözleşmenin kur mantığını izler.
+  exchangeRateAtCreation Float? @map("exchangeRate")
   dueDate    DateTime
   status     String   @default("Bekliyor")
   invoiceNumber String?
@@ -732,7 +740,11 @@ model EmailQueue {
 model ExchangeRateCache {
   code      String   @id
   rate      Float
+  /// TCMB | FALLBACK_ECB | MANUEL | SEED
   source    String   @default("TCMB")
+  /// Kaynağın yayınladığı değerleme tarihi (çekim zamanından farklı olabilir:
+  /// hafta sonu ve tatillerde TCMB bir önceki iş gününün kurunu yayınlar).
+  rateDate  DateTime?
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }

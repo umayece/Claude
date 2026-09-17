@@ -349,7 +349,16 @@ export function Offers() {
                       <td className="font-semibold">{offer.title}</td>
                       <td className="text-sm">{offer.company?.name ?? '—'}</td>
                       <td><span className="badge badge-info">{offer.status}</span></td>
-                      <td className="text-right nowrap">{format(offer.total, offer.currency)}</td>
+                      <td className="text-right nowrap">
+                        <span className="dual-amount" style={{ alignItems: 'flex-end' }}>
+                          <span className="dual-primary">{format(offer.total, offer.currency)}</span>
+                          {offer.currency !== 'TRY' && (
+                            <span className="dual-secondary">
+                              ≈ {format(offer.amountTry ?? offer.totalTry ?? 0, 'TRY')}
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="text-sm nowrap">
                         {offer.validUntil
                           ? new Date(offer.validUntil).toLocaleDateString('tr-TR')
@@ -616,6 +625,25 @@ export function Offers() {
                 <div className="kpi-value" style={{ fontSize: 19 }}>
                   {format(detail.total, detail.currency)}
                 </div>
+                {/* Onaylanmış teklif resmiyet kazanmıştır: teklif tarihindeki
+                    kur muhasebe kaydıdır, bugünkü kur piyasa gerçeğidir.
+                    İkisi yan yana gösterilir; taslakta yalnızca anlık değer. */}
+                {detail.currency !== 'TRY' && (
+                  <div className="dual-amount mt-1">
+                    {detail.amountTryAtCreation !== null
+                      && detail.amountTryAtCreation !== undefined && (
+                      <span className="dual-secondary">
+                        Teklif tarihindeki değeri: {format(detail.amountTryAtCreation, 'TRY')}
+                      </span>
+                    )}
+                    <span className="dual-secondary">
+                      Güncel piyasa değeri: {format(detail.amountTry ?? detail.totalTry ?? 0, 'TRY')}
+                    </span>
+                    {detail.hasDrift && (
+                      <span className="rate-drift">Kayıt anına göre kur farkı var</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

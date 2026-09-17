@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../lib/env';
 import { prisma } from '../lib/prisma';
 import { BadRequest, NotFound } from '../lib/errors';
-import { toTry } from './currency.service';
+import { getRateMap, toTryAt } from './currency.service';
 import { answerLocally, type AnswerScope } from './localAnswer.service';
 import { getSetting, SETTING_KEYS } from './settings.service';
 
@@ -89,7 +89,7 @@ async function buildCompanyContext(companyId: string): Promise<AiPreparedPrompt>
         orderBy: { createdAt: 'desc' },
         take: 25,
         select: {
-          title: true, stage: true, amount: true, currency: true, exchangeRate: true,
+          title: true, stage: true, amount: true, currency: true,
           expectedCloseDate: true, lossReason: true, winProbabilityScore: true,
         },
       },
@@ -124,9 +124,10 @@ async function buildCompanyContext(companyId: string): Promise<AiPreparedPrompt>
 
   if (!company) throw NotFound('Şirket bulunamadı.');
 
+  const rates = await getRateMap();
   const totalTry = company.deals
     .filter((d) => d.stage === 'Kazanıldı')
-    .reduce((sum, d) => sum + toTry(d.amount, d.exchangeRate), 0);
+    .reduce((sum, d) => sum + toTryAt(d.amount, d.currency, rates), 0);
 
   const lines: string[] = [];
   lines.push('## ŞİRKET KÜNYESİ');

@@ -1,10 +1,11 @@
 import { useState, type ReactElement } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { useExchangeRates } from '../hooks/useExchangeRates';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationBell } from './NotificationBell';
 import { Avatar } from './Avatar';
+import { RateWidget } from './RateWidget';
+import { MkeStar } from './MkeStar';
 import {
   IconAlert, IconArchive, IconBox, IconBuilding, IconCalendar, IconChart,
   IconFile, IconGavel, IconInbox, IconLogout, IconMap, IconMenu, IconNote,
@@ -82,7 +83,6 @@ const GROUPS: NavGroup[] = [
 
 export function Layout() {
   const { user, logout, can } = useAuth();
-  const { rates, isStale } = useExchangeRates();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -130,18 +130,11 @@ export function Layout() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="flex items-center gap-2">
-            <span>USD {rates.USD.toFixed(2)}</span>
-            <span>·</span>
-            <span>EUR {rates.EUR.toFixed(2)}</span>
-          </div>
-          {isStale && (
-            <div className="flex items-center gap-1 mt-1" style={{ color: '#d97706' }}>
-              <IconAlert size={11} />
-              <span>Kur 24 saatten eski</span>
-            </div>
-          )}
+          <RateWidget />
         </div>
+
+        {/* MKE sekiz köşeli yıldız motifi — çok düşük opaklıkta doku. */}
+        <MkeStar className="sidebar-watermark" size={210} />
       </aside>
 
       <div className="main-area">

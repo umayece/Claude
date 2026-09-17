@@ -58,6 +58,12 @@ export const env = {
   trashRetentionDays: int('TRASH_RETENTION_DAYS', 30),
   enableBackgroundJobs: bool('ENABLE_BACKGROUND_JOBS', true),
   tcmbUrl: process.env.TCMB_URL ?? 'https://www.tcmb.gov.tr/kurlar/today.xml',
+  /** İş günü içinde kur çekme aralığı (dakika). */
+  exchangeSyncIntervalMinutes: int('EXCHANGE_SYNC_INTERVAL_MINUTES', 30),
+  /** TCMB'ye ulaşılamazsa açık kaynak yedeğe düşülsün mü? */
+  exchangeFallbackEnabled: bool('EXCHANGE_FALLBACK_ENABLED', true),
+  exchangeFallbackUrl:
+    process.env.EXCHANGE_FALLBACK_URL ?? 'https://api.frankfurter.app/latest',
 
   ai: {
     apiKey: process.env.ANTHROPIC_API_KEY ?? '',

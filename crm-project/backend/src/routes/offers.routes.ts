@@ -10,7 +10,9 @@ import { requirePermission, assertCompanyAccess, companyScope } from '../middlew
 import { validate, validated } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import { logActivity } from '../services/activity.service';
-import { resolveExchangeRate, SUPPORTED_CURRENCIES, toTry } from '../services/currency.service';
+import {
+  dualValue, getRateMap, shouldFreezeRate, SUPPORTED_CURRENCIES,
+} from '../services/currency.service';
 import { nextSequence } from '../services/sequence.service';
 
 const router = Router();
@@ -112,6 +114,7 @@ router.get(
     }
 
     const where: Prisma.OfferWhereInput = { AND: and };
+    const rates = await getRateMap();
     const [rows, total] = await prisma.$transaction([
       prisma.offer.findMany({
         where, include: offerInclude,
@@ -121,7 +124,17 @@ router.get(
       prisma.offer.count({ where }),
     ]);
 
-    res.json(paginated(rows.map((o) => ({ ...o, totalTry: toTry(o.total, o.exchangeRate) })), total, page));
+    // Taslak teklifler piyasayı izler; gönderilmiş/kabul edilmiş teklifler
+    // kayıt anı kuruyla birlikte ÇİFT gösterilir.
+    res.json(paginated(
+      rows.map((offer) => ({
+        ...offer,
+        ...dualValue(offer.total, offer.currency, offer.exchangeRateAtCreation, rates),
+        totalTry: dualValue(offer.total, offer.currency, offer.exchangeRateAtCreation, rates).amountTry,
+      })),
+      total,
+      page,
+    ));
   }),
 );
 
@@ -135,7 +148,9 @@ router.get(
       include: { ...offerInclude, items: { orderBy: { sortOrder: 'asc' } } },
     });
     if (!offer) throw NotFound('Teklif bulunamadı.');
-    res.json({ ...offer, totalTry: toTry(offer.total, offer.exchangeRate) });
+    const rates = await getRateMap();
+    const valuation = dualValue(offer.total, offer.currency, offer.exchangeRateAtCreation, rates);
+    res.json({ ...offer, ...valuation, totalTry: valuation.amountTry });
   }),
 );
 
@@ -159,7 +174,10 @@ router.post(
         dealId: body.dealId ?? null,
         status: body.status,
         currency: body.currency,
-        exchangeRate: await resolveExchangeRate(body.currency),
+        // Yalnızca resmiyet kazanmış teklifte kur dondurulur.
+        exchangeRateAtCreation: shouldFreezeRate('offer', body.status)
+          ? (await getRateMap())[body.currency] ?? 1
+          : null,
         subtotal: totals.subtotal,
         taxTotal: totals.taxTotal,
         total: totals.total,
@@ -213,10 +231,14 @@ router.put(
       await assertCompanyAccess(req.user, body.companyId);
     }
 
-    const exchangeRate =
-      body.currency && body.currency !== existing.currency
-        ? await resolveExchangeRate(body.currency)
-        : existing.exchangeRate;
+    // Teklif taslaktan çıkıp gönderildiğinde/kabul edildiğinde o anki kur
+    // dondurulur; geri taslağa dönerse dondurma kalkar ve piyasayı izler.
+    const nextStatus = body.status ?? existing.status;
+    const nextCurrency = body.currency ?? existing.currency;
+    const shouldFreeze = shouldFreezeRate('offer', nextStatus);
+    const exchangeRateAtCreation = shouldFreeze
+      ? existing.exchangeRateAtCreation ?? (await getRateMap())[nextCurrency as never] ?? 1
+      : null;
 
     const offer = await prisma.$transaction(async (tx) => {
       if (body.items !== undefined) {
@@ -253,7 +275,8 @@ router.put(
           ...(body.contactId !== undefined ? { contactId: body.contactId } : {}),
           ...(body.dealId !== undefined ? { dealId: body.dealId } : {}),
           ...(body.status !== undefined ? { status: body.status } : {}),
-          ...(body.currency !== undefined ? { currency: body.currency, exchangeRate } : {}),
+          ...(body.currency !== undefined ? { currency: body.currency } : {}),
+          exchangeRateAtCreation,
           ...(body.validUntil !== undefined ? { validUntil: body.validUntil } : {}),
           ...(body.notes !== undefined ? { notes: body.notes } : {}),
           ...(body.terms !== undefined ? { terms: body.terms } : {}),

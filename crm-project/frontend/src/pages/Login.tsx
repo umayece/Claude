@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { IconShield } from '../components/Icons';
+import { MkeStar } from '../components/MkeStar';
 
 export function Login() {
   const { user, mfaPending, initializing, login, verifyMfa } = useAuth();
@@ -17,7 +18,8 @@ export function Login() {
   if (initializing) {
     return (
       <div className="login-shell">
-        <span className="spinner spinner-lg" style={{ borderTopColor: '#38bdf8' }} />
+        <MkeStar className="login-watermark" size={620} color="#ffffff" />
+        <span className="spinner spinner-lg" style={{ borderTopColor: 'var(--mke-teal)' }} />
       </div>
     );
   }
@@ -57,6 +59,8 @@ export function Login() {
 
   return (
     <div className="login-shell">
+      {/* Marka kimlik kılavuzu s.22 — sekiz köşeli Türk Yıldızı filigranı. */}
+      <MkeStar className="login-watermark" size={620} color="#ffffff" />
       <div className="login-card">
         <div className="login-brand">
           <div className="login-brand-mark">MKE</div>

@@ -10,7 +10,9 @@ import { requirePermission, assertCompanyAccess, companyScope } from '../middlew
 import { validate, validated } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import { logActivity } from '../services/activity.service';
-import { resolveExchangeRate, SUPPORTED_CURRENCIES, toTry } from '../services/currency.service';
+import {
+  getRateMap, liveValue, SUPPORTED_CURRENCIES, toTryAt,
+} from '../services/currency.service';
 import { calculateWinProbability, LOSS_REASONS } from '../services/scoring.service';
 import { nextSequence } from '../services/sequence.service';
 
@@ -66,7 +68,7 @@ async function computeTenderScore(tenderId: string): Promise<number> {
   const tender = await prisma.tender.findUniqueOrThrow({
     where: { id: tenderId },
     select: {
-      companyId: true, status: true, estimatedValue: true, exchangeRate: true,
+      companyId: true, status: true, estimatedValue: true, currency: true,
       submissionDeadline: true, specificationText: true,
     },
   });
@@ -87,7 +89,7 @@ async function computeTenderScore(tenderId: string): Promise<number> {
     wonDealCount: won,
     lostDealCount: lost,
     recentActivityCount: activityCount,
-    amountTry: toTry(tender.estimatedValue, tender.exchangeRate),
+    amountTry: toTryAt(tender.estimatedValue, tender.currency, await getRateMap()),
     // Şartname yüklenmiş olması sürecin ciddiyetinin göstergesidir.
     hasOffer: Boolean(tender.specificationText),
     hasContact: true,
@@ -132,6 +134,7 @@ router.get(
     }
 
     const where: Prisma.TenderWhereInput = { AND: and };
+    const rates = await getRateMap();
     const [rows, total] = await prisma.$transaction([
       prisma.tender.findMany({
         where, include: tenderInclude,
@@ -148,7 +151,9 @@ router.get(
           // Liste yanıtında tam şartname taşınmaz; yalnızca varlığı bildirilir.
           specificationText: undefined,
           hasSpecification: Boolean(t.specificationText),
-          estimatedValueTry: toTry(t.estimatedValue, t.exchangeRate),
+          // Anlık kurla değerleme.
+          ...liveValue(t.estimatedValue, t.currency, rates),
+          estimatedValueTry: toTryAt(t.estimatedValue, t.currency, rates),
           daysUntilDeadline: t.submissionDeadline
             ? Math.ceil((t.submissionDeadline.getTime() - Date.now()) / 86_400_000)
             : null,
@@ -174,7 +179,12 @@ router.get(
       },
     });
     if (!tender) throw NotFound('İhale bulunamadı.');
-    res.json({ ...tender, estimatedValueTry: toTry(tender.estimatedValue, tender.exchangeRate) });
+    const rates = await getRateMap();
+    res.json({
+      ...tender,
+      ...liveValue(tender.estimatedValue, tender.currency, rates),
+      estimatedValueTry: toTryAt(tender.estimatedValue, tender.currency, rates),
+    });
   }),
 );
 
@@ -196,7 +206,8 @@ router.post(
         status: body.status,
         method: body.method ?? null,
         currency: body.currency,
-        exchangeRate: await resolveExchangeRate(body.currency),
+        // Denetim izi; ihale değerlemesi anlık kurla yapılır.
+        exchangeRateAtCreation: (await getRateMap())[body.currency] ?? 1,
         estimatedValue: body.estimatedValue,
         submissionDeadline: body.submissionDeadline ?? null,
         announcementDate: body.announcementDate ?? null,
@@ -240,11 +251,6 @@ router.put(
       await assertCompanyAccess(req.user, body.companyId);
     }
 
-    const exchangeRate =
-      body.currency && body.currency !== existing.currency
-        ? await resolveExchangeRate(body.currency)
-        : existing.exchangeRate;
-
     await prisma.tender.update({
       where: { id },
       data: {
@@ -253,7 +259,7 @@ router.put(
         ...(body.companyId !== undefined ? { companyId: body.companyId } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.method !== undefined ? { method: body.method } : {}),
-        ...(body.currency !== undefined ? { currency: body.currency, exchangeRate } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
         ...(body.estimatedValue !== undefined ? { estimatedValue: body.estimatedValue } : {}),
         ...(body.submissionDeadline !== undefined ? { submissionDeadline: body.submissionDeadline } : {}),
         ...(body.announcementDate !== undefined ? { announcementDate: body.announcementDate } : {}),

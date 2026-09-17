@@ -344,7 +344,16 @@ export function Tenders() {
 
                       <td><span className="badge badge-info">{tender.status}</span></td>
                       <td className="text-right nowrap">
-                        {format(tender.estimatedValue, tender.currency)}
+                        <span className="dual-amount" style={{ alignItems: 'flex-end' }}>
+                          <span className="dual-primary">
+                            {format(tender.estimatedValue, tender.currency)}
+                          </span>
+                          {tender.currency !== 'TRY' && (
+                            <span className="dual-secondary">
+                              ≈ {format(tender.amountTry ?? 0, 'TRY')}
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="text-right"><ScoreBadge score={tender.winProbabilityScore} /></td>
                       <td className="nowrap">{deadlineBadge(tender.daysUntilDeadline)}</td>

@@ -10,7 +10,9 @@ import { requirePermission, assertCompanyAccess, companyScope } from '../middlew
 import { validate, validated } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import { logActivity } from '../services/activity.service';
-import { resolveExchangeRate, SUPPORTED_CURRENCIES, toTry } from '../services/currency.service';
+import {
+  getRateMap, liveValue, SUPPORTED_CURRENCIES, toTryAt,
+} from '../services/currency.service';
 import { calculateWinProbability, LOSS_REASONS } from '../services/scoring.service';
 
 const router = Router();
@@ -68,7 +70,7 @@ async function computeScore(dealId: string): Promise<number> {
   const deal = await prisma.deal.findUniqueOrThrow({
     where: { id: dealId },
     select: {
-      companyId: true, stage: true, amount: true, exchangeRate: true,
+      companyId: true, stage: true, amount: true, currency: true,
       expectedCloseDate: true, contactId: true,
     },
   });
@@ -90,7 +92,7 @@ async function computeScore(dealId: string): Promise<number> {
     wonDealCount: won,
     lostDealCount: lost,
     recentActivityCount: recentActivity,
-    amountTry: toTry(deal.amount, deal.exchangeRate),
+    amountTry: toTryAt(deal.amount, deal.currency, await getRateMap()),
     hasOffer: offerCount > 0,
     hasContact: Boolean(deal.contactId),
   });
@@ -123,19 +125,30 @@ router.get(
     }
 
     const where: Prisma.DealWhereInput = { AND: and };
-    const [rows, total, aggregate] = await prisma.$transaction([
+    const [rows, total] = await prisma.$transaction([
       prisma.deal.findMany({
         where, include: dealInclude,
         orderBy,
         skip: page.skip, take: page.take,
       }),
       prisma.deal.count({ where }),
-      prisma.deal.aggregate({ where, _sum: { amount: true } }),
     ]);
 
+    // Değerleme İSTEK ANINDAKİ kurla yapılır; kayıt üstünde dondurulmuş
+    // bir kur kullanılmaz (bkz. currency.service — değerleme mimarisi).
+    const rates = await getRateMap();
+    const data = rows.map((deal) => ({
+      ...deal,
+      ...liveValue(deal.amount, deal.currency, rates),
+    }));
+
     res.json({
-      ...paginated(rows.map((d) => ({ ...d, amountTry: toTry(d.amount, d.exchangeRate) })), total, page),
-      summary: { rawAmountSum: aggregate._sum.amount ?? 0 },
+      ...paginated(data, total, page),
+      summary: {
+        pageAmountTry: data.reduce((sum, d) => sum + d.amountTry, 0),
+        pageAmountUsd: data.reduce((sum, d) => sum + d.amountUsd, 0),
+        valuedAt: new Date().toISOString(),
+      },
     });
   }),
 );
@@ -160,15 +173,19 @@ router.get(
     // gruplamayı bellekte, dondurulmuş kurla yapıyoruz.
     const rows = await prisma.deal.findMany({
       where,
-      select: { stage: true, amount: true, exchangeRate: true },
+      select: { stage: true, amount: true, currency: true },
     });
+    const rates = await getRateMap();
 
     const buckets = DEAL_STAGES.map((stage) => {
       const items = rows.filter((r) => r.stage === stage);
       return {
         stage,
         count: items.length,
-        totalTry: Math.round(items.reduce((s, r) => s + toTry(r.amount, r.exchangeRate), 0) * 100) / 100,
+        totalTry: Math.round(items.reduce((s, r) => s + toTryAt(r.amount, r.currency, rates), 0) * 100) / 100,
+        totalUsd: Math.round(
+          items.reduce((s, r) => s + toTryAt(r.amount, r.currency, rates) / (rates.USD || 1), 0) * 100,
+        ) / 100,
       };
     });
 
@@ -211,7 +228,7 @@ router.get(
       },
     });
     if (!deal) throw NotFound('Fırsat bulunamadı.');
-    res.json({ ...deal, amountTry: toTry(deal.amount, deal.exchangeRate) });
+    res.json({ ...deal, ...liveValue(deal.amount, deal.currency, await getRateMap()) });
   }),
 );
 
@@ -234,8 +251,9 @@ router.post(
         stage: body.stage,
         amount: body.amount,
         currency: body.currency,
-        // Kur kayıt anında dondurulur; sonraki kur hareketleri geçmişi bozmaz.
-        exchangeRate: await resolveExchangeRate(body.currency),
+        // Fırsat değerlemesi ANLIK kurla yapılır. Bu alan yalnızca
+        // "kayıt anında kur neydi" sorusunun denetim yanıtıdır.
+        exchangeRateAtCreation: (await getRateMap())[body.currency] ?? 1,
         expectedCloseDate: body.expectedCloseDate ?? null,
         description: body.description ?? null,
         customFields: (body.customFields ?? undefined) as Prisma.InputJsonValue | undefined,
@@ -254,7 +272,7 @@ router.post(
       companyId: deal.companyId, dealId: deal.id, contactId: deal.contactId, userId: req.user!.id,
     });
 
-    res.status(201).json({ ...deal, amountTry: toTry(deal.amount, deal.exchangeRate) });
+    res.status(201).json({ ...deal, ...liveValue(deal.amount, deal.currency, await getRateMap()) });
   }),
 );
 
@@ -276,12 +294,6 @@ router.put(
       await assertCompanyAccess(req.user, body.companyId);
     }
 
-    // Para birimi değiştiyse kur yeniden çözülür; aksi halde donmuş kur korunur.
-    const exchangeRate =
-      body.currency && body.currency !== existing.currency
-        ? await resolveExchangeRate(body.currency)
-        : existing.exchangeRate;
-
     await prisma.deal.update({
       where: { id },
       data: {
@@ -291,7 +303,7 @@ router.put(
         ...(body.ownerId !== undefined ? { ownerId: body.ownerId } : {}),
         ...(body.stage !== undefined ? { stage: body.stage } : {}),
         ...(body.amount !== undefined ? { amount: body.amount } : {}),
-        ...(body.currency !== undefined ? { currency: body.currency, exchangeRate } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
         ...(body.expectedCloseDate !== undefined ? { expectedCloseDate: body.expectedCloseDate } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
         ...(body.lossReason !== undefined ? { lossReason: body.lossReason } : {}),
@@ -318,7 +330,7 @@ router.put(
       });
     }
 
-    res.json({ ...deal, amountTry: toTry(deal.amount, deal.exchangeRate) });
+    res.json({ ...deal, ...liveValue(deal.amount, deal.currency, await getRateMap()) });
   }),
 );
 
@@ -366,7 +378,7 @@ router.put(
       metadata: { from: existing.stage, to: body.stage, lossReason: body.lossReason ?? null },
     });
 
-    res.json({ ...deal, amountTry: toTry(deal.amount, deal.exchangeRate) });
+    res.json({ ...deal, ...liveValue(deal.amount, deal.currency, await getRateMap()) });
   }),
 );
 

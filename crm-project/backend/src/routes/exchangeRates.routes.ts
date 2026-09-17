@@ -6,7 +6,8 @@ import { requireRole } from '../middleware/rbac';
 import { validate } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import {
-  getRates, setManualRate, SUPPORTED_CURRENCIES, type CurrencyCode,
+  getRateFreshness, getRates, setManualRate, SUPPORTED_CURRENCIES,
+  type CurrencyCode,
 } from '../services/currency.service';
 import { syncExchangeRates } from '../jobs/exchangeRateSync';
 
@@ -17,22 +18,14 @@ router.use(authenticate, requireMfaComplete);
 router.get(
   '/',
   asyncHandler(async (_req, res) => {
-    const rates = await getRates();
-    const nonBase = rates.filter((r) => r.code !== 'TRY');
-    const oldest = nonBase.length
-      ? nonBase.reduce((min, r) => (r.updatedAt < min ? r.updatedAt : min), nonBase[0]!.updatedAt)
-      : null;
+    const [rates, freshness] = await Promise.all([getRates(), getRateFreshness()]);
 
     res.json({
       base: 'TRY',
       data: rates,
-      meta: {
-        lastUpdatedAt: oldest,
-        // Kur 24 saatten eskiyse istemci bunu kullanıcıya bildirir;
-        // internet kesintisinde eski kurla çalışmak sessizce olmamalı.
-        isStale: oldest ? Date.now() - oldest.getTime() > 24 * 3_600_000 : true,
-        sources: [...new Set(nonBase.map((r) => r.source))],
-      },
+      // Tazelik bilgisi arayüzde açıkça gösterilir: eski kurla çalışmak
+      // sessizce olmamalı.
+      meta: freshness,
     });
   }),
 );

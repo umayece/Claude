@@ -60,7 +60,7 @@ export function Deals() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
-  const { format } = useExchangeRates();
+  const { format, formatCompact, value } = useExchangeRates();
 
   const [term, setTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('');
@@ -351,7 +351,7 @@ export function Deals() {
                     <th>Müşteri</th>
                     <th>Aşama</th>
                     <th className="text-right">Tutar</th>
-                    <th className="text-right">TL Karşılığı</th>
+                    <th className="text-right">Güncel Değer</th>
                     <th className="text-right">Skor</th>
                     <th>Beklenen Kapanış</th>
                     <th className="col-actions">İşlem</th>
@@ -377,8 +377,18 @@ export function Deals() {
 
                       <td><span className="badge badge-info">{deal.stage}</span></td>
                       <td className="text-right nowrap">{format(deal.amount, deal.currency)}</td>
-                      <td className="text-right nowrap text-muted">
-                        {format(deal.amountTry ?? deal.amount * deal.exchangeRate, 'TRY')}
+                      <td className="text-right nowrap">
+                        {/* Anlık kurla değerleme — kayıt anındaki kur değil. */}
+                        <span className="dual-amount" style={{ alignItems: 'flex-end' }}>
+                          <span className="dual-primary">
+                            {format(deal.amountTry ?? value(deal.amount, deal.currency).amountTry, 'TRY')}
+                          </span>
+                          <span className="dual-secondary">
+                            ≈ {formatCompact(
+                              deal.amountUsd ?? value(deal.amount, deal.currency).amountUsd, 'USD',
+                            )}
+                          </span>
+                        </span>
                       </td>
                       <td className="text-right"><ScoreBadge score={deal.winProbabilityScore} /></td>
                       <td className="text-sm nowrap">

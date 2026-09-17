@@ -10,7 +10,9 @@ import { requirePermission, assertCompanyAccess, companyScope } from '../middlew
 import { validate, validated } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import { logActivity } from '../services/activity.service';
-import { resolveExchangeRate, SUPPORTED_CURRENCIES, toTry } from '../services/currency.service';
+import {
+  dualValue, getRateMap, shouldFreezeRate, SUPPORTED_CURRENCIES, type RateMap,
+} from '../services/currency.service';
 import { nextSequence } from '../services/sequence.service';
 
 const router = Router();
@@ -67,16 +69,20 @@ const contractInclude = {
 } satisfies Prisma.ContractInclude;
 
 /** Vadesi geçmiş, henüz tahsil edilmemiş hakedişleri "Gecikti" olarak işaretler. */
-function decorateMilestone(m: {
-  status: string; dueDate: Date; paidAt: Date | null; amount: number; exchangeRate: number;
-}) {
+function decorateMilestone(
+  m: {
+    status: string; dueDate: Date; paidAt: Date | null;
+    amount: number; currency: string; exchangeRateAtCreation: number | null;
+  },
+  rates: RateMap,
+) {
   const overdue = m.status !== 'Tahsil Edildi' && m.paidAt === null && m.dueDate < new Date();
   return {
     ...m,
     effectiveStatus: overdue ? 'Gecikti' : m.status,
     isOverdue: overdue,
     daysOverdue: overdue ? Math.floor((Date.now() - m.dueDate.getTime()) / 86_400_000) : 0,
-    amountTry: toTry(m.amount, m.exchangeRate),
+    ...dualValue(m.amount, m.currency, m.exchangeRateAtCreation, rates),
   };
 }
 
@@ -115,6 +121,7 @@ router.get(
     }
 
     const where: Prisma.ContractWhereInput = { AND: and };
+    const rates = await getRateMap();
     const [rows, total] = await prisma.$transaction([
       prisma.contract.findMany({
         where, include: contractInclude,
@@ -126,7 +133,10 @@ router.get(
 
     res.json(
       paginated(
-        rows.map((c) => ({ ...c, amountTry: toTry(c.amount, c.exchangeRate) })),
+        rows.map((contract) => ({
+          ...contract,
+          ...dualValue(contract.amount, contract.currency, contract.exchangeRateAtCreation, rates),
+        })),
         total,
         page,
       ),
@@ -149,7 +159,8 @@ router.get(
     });
     if (!contract) throw NotFound('Sözleşme bulunamadı.');
 
-    const milestones = contract.milestones.map(decorateMilestone);
+    const rates = await getRateMap();
+    const milestones = contract.milestones.map((m) => decorateMilestone(m, rates));
     const collectedTry = milestones
       .filter((m) => m.effectiveStatus === 'Tahsil Edildi')
       .reduce((sum, m) => sum + m.amountTry, 0);
@@ -160,7 +171,8 @@ router.get(
     res.json({
       ...contract,
       milestones,
-      amountTry: toTry(contract.amount, contract.exchangeRate),
+      // İmza tarihindeki değer ile güncel piyasa değeri birlikte döner.
+      ...dualValue(contract.amount, contract.currency, contract.exchangeRateAtCreation, rates),
       milestoneSummary: {
         total: milestones.length,
         collectedTry: Math.round(collectedTry * 100) / 100,
@@ -191,7 +203,10 @@ router.post(
         status: body.status,
         amount: body.amount,
         currency: body.currency,
-        exchangeRate: await resolveExchangeRate(body.currency),
+        // Taslak olmayan sözleşmede imza tarihi kuru dondurulur.
+        exchangeRateAtCreation: shouldFreezeRate('contract', body.status)
+          ? (await getRateMap())[body.currency] ?? 1
+          : null,
         startDate: body.startDate ?? null,
         endDate: body.endDate ?? null,
         renewalDate: body.renewalDate ?? null,
@@ -229,10 +244,12 @@ router.put(
       await assertCompanyAccess(req.user, body.companyId);
     }
 
-    const exchangeRate =
-      body.currency && body.currency !== existing.currency
-        ? await resolveExchangeRate(body.currency)
-        : existing.exchangeRate;
+    // Sözleşme taslaktan çıktığında o anki kur imza kuru olarak dondurulur.
+    const nextStatus = body.status ?? existing.status;
+    const nextCurrency = body.currency ?? existing.currency;
+    const exchangeRateAtCreation = shouldFreezeRate('contract', nextStatus)
+      ? existing.exchangeRateAtCreation ?? (await getRateMap())[nextCurrency as never] ?? 1
+      : null;
 
     const contract = await prisma.contract.update({
       where: { id },
@@ -244,7 +261,8 @@ router.put(
         ...(body.tenderId !== undefined ? { tenderId: body.tenderId } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.amount !== undefined ? { amount: body.amount } : {}),
-        ...(body.currency !== undefined ? { currency: body.currency, exchangeRate } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
+        exchangeRateAtCreation,
         ...(body.startDate !== undefined ? { startDate: body.startDate } : {}),
         ...(body.endDate !== undefined ? { endDate: body.endDate } : {}),
         ...(body.renewalDate !== undefined ? { renewalDate: body.renewalDate } : {}),
@@ -288,7 +306,10 @@ router.delete(
 async function assertContractAccess(user: Express.Request['user'], contractId: string) {
   const contract = await prisma.contract.findFirst({
     where: { id: contractId, deletedAt: null, company: companyScope(user) },
-    select: { id: true, companyId: true, contractNumber: true },
+    select: {
+      id: true, companyId: true, contractNumber: true,
+      status: true, exchangeRateAtCreation: true,
+    },
   });
   if (!contract) throw NotFound('Sözleşme bulunamadı.');
   return contract;
@@ -304,7 +325,8 @@ router.get(
       where: { contractId: String(req.params.id) },
       orderBy: [{ sortOrder: 'asc' }, { dueDate: 'asc' }],
     });
-    res.json({ data: rows.map(decorateMilestone) });
+    const rates = await getRateMap();
+    res.json({ data: rows.map((m) => decorateMilestone(m, rates)) });
   }),
 );
 
@@ -324,7 +346,11 @@ router.post(
         title: body.title,
         amount: body.amount,
         currency: body.currency,
-        exchangeRate: await resolveExchangeRate(body.currency),
+        // Hakediş, bağlı olduğu sözleşmenin kur mantığını izler: sözleşme
+        // imzalanmışsa o anki kur dondurulur, taslaksa piyasayı izler.
+        exchangeRateAtCreation: shouldFreezeRate('contract', contract.status)
+          ? (await getRateMap())[body.currency] ?? 1
+          : null,
         dueDate: body.dueDate,
         status: body.status,
         invoiceNumber: body.invoiceNumber ?? null,
@@ -335,7 +361,7 @@ router.post(
     });
 
     req.auditContext = { entityType: 'PaymentMilestone', entityId: milestone.id };
-    res.status(201).json(decorateMilestone(milestone));
+    res.status(201).json(decorateMilestone(milestone, await getRateMap()));
   }),
 );
 
@@ -355,17 +381,19 @@ router.put(
     if (!existing) throw NotFound('Hakediş kaydı bulunamadı.');
 
     const body = req.body as Partial<z.infer<typeof milestoneBodySchema>>;
-    const exchangeRate =
-      body.currency && body.currency !== existing.currency
-        ? await resolveExchangeRate(body.currency)
-        : existing.exchangeRate;
+    const rates = await getRateMap();
+    const nextCurrency = body.currency ?? existing.currency;
+    const milestoneRate = shouldFreezeRate('contract', contract.status)
+      ? existing.exchangeRateAtCreation ?? rates[nextCurrency as never] ?? 1
+      : null;
 
     const milestone = await prisma.paymentMilestone.update({
       where: { id: milestoneId },
       data: {
         ...(body.title !== undefined ? { title: body.title } : {}),
         ...(body.amount !== undefined ? { amount: body.amount } : {}),
-        ...(body.currency !== undefined ? { currency: body.currency, exchangeRate } : {}),
+        ...(body.currency !== undefined ? { currency: body.currency } : {}),
+        exchangeRateAtCreation: milestoneRate,
         ...(body.dueDate !== undefined ? { dueDate: body.dueDate } : {}),
         ...(body.invoiceNumber !== undefined ? { invoiceNumber: body.invoiceNumber } : {}),
         ...(body.note !== undefined ? { note: body.note } : {}),
@@ -385,7 +413,7 @@ router.put(
       },
     });
 
-    res.json(decorateMilestone(milestone));
+    res.json(decorateMilestone(milestone, rates));
   }),
 );
 

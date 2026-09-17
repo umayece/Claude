@@ -304,9 +304,12 @@ export function Contracts() {
             ['Konu', contract.title],
             ['Durum', contract.status],
             ['Sözleşme Bedeli', `${contract.amount.toLocaleString('tr-TR')} ${contract.currency}`],
-            ['TL Karşılığı (kayıt kuru)',
-              `${Math.round(contract.amountTry ?? contract.amount * contract.exchangeRate)
-                .toLocaleString('tr-TR')} ₺`],
+            ...(contract.amountTryAtCreation
+              ? ([['İmza Tarihindeki Değeri',
+                  `${Math.round(contract.amountTryAtCreation).toLocaleString('tr-TR')} ₺`]] as [string, string][])
+              : []),
+            ['Güncel Piyasa Değeri',
+              `${Math.round(contract.amountTry ?? 0).toLocaleString('tr-TR')} ₺`],
             ['Başlangıç Tarihi',
               contract.startDate ? new Date(contract.startDate).toLocaleDateString('tr-TR') : '—'],
             ['Bitiş Tarihi',
@@ -528,8 +531,27 @@ export function Contracts() {
               <div className="spec-list mb-4">
                 <SpecRow label="Durum"><span className="badge badge-info">{detail.status}</span></SpecRow>
                 <SpecRow label="Tutar">{format(detail.amount, detail.currency)}</SpecRow>
-                <SpecRow label="TL Karşılığı">
-                  {format(detail.amountTry ?? detail.amount * detail.exchangeRate, 'TRY')}
+                {/* Resmiyet kazanmış sözleşmede iki değerleme YAN YANA:
+                    imza tarihindeki muhasebe değeri ve bugünkü piyasa değeri. */}
+                {detail.amountTryAtCreation !== null && detail.amountTryAtCreation !== undefined && (
+                  <SpecRow label="İmza Tarihi Değeri">
+                    {format(detail.amountTryAtCreation, 'TRY')}
+                  </SpecRow>
+                )}
+                <SpecRow label="Güncel Piyasa Değeri">
+                  <span className="dual-amount">
+                    <span className="dual-primary">{format(detail.amountTry ?? 0, 'TRY')}</span>
+                    <span className="dual-secondary">
+                      ≈ {format(detail.amountUsd ?? 0, 'USD')}
+                    </span>
+                    {detail.hasDrift && detail.driftPercent !== null
+                      && detail.driftPercent !== undefined && (
+                      <span className="rate-drift">
+                        {detail.driftPercent > 0 ? '▲' : '▼'} %{Math.abs(detail.driftPercent).toFixed(1)}
+                        {' '}kur farkı
+                      </span>
+                    )}
+                  </span>
                 </SpecRow>
                 <SpecRow label="Başlangıç">
                   {detail.startDate ? new Date(detail.startDate).toLocaleDateString('tr-TR') : null}

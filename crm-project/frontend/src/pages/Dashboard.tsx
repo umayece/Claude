@@ -18,14 +18,30 @@ const PRESETS: { key: RangePreset; label: string }[] = [
   { key: 'custom', label: 'Özel Tarih' },
 ];
 
-function formatTry(value: number): string {
+function formatCompact(value: number, symbol: string): string {
   if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} M ₺`;
+    return `${(value / 1_000_000).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} M ${symbol}`;
   }
   if (value >= 1_000) {
-    return `${(value / 1_000).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} B ₺`;
+    return `${(value / 1_000).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} B ${symbol}`;
   }
-  return `${value.toLocaleString('tr-TR')} ₺`;
+  return `${value.toLocaleString('tr-TR')} ${symbol}`;
+}
+
+function formatTry(value: number): string {
+  return formatCompact(value, '₺');
+}
+
+function formatUsd(value: number): string {
+  return formatCompact(value, '$');
+}
+
+/** Değerleme anını "14:35 kuruyla" biçiminde gösterir. */
+function valuationLabel(valuedAt: string | undefined): string | null {
+  if (!valuedAt) return null;
+  const at = new Date(valuedAt);
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })} kuruyla`;
 }
 
 export function Dashboard() {
@@ -138,6 +154,7 @@ export function Dashboard() {
               <div className="kpi-label"><IconTrending size={13} /> Kazanılan Tutar</div>
               <div className="kpi-value">{formatTry(kpis.wonAmountTry)}</div>
               <div className="kpi-sub">
+                {formatUsd(kpis.wonAmountUsd)} ·{' '}
                 {kpis.winRate !== null ? `Kazanma oranı %${kpis.winRate}` : 'Kapanan iş yok'}
               </div>
             </div>
@@ -145,7 +162,9 @@ export function Dashboard() {
             <div className="kpi">
               <div className="kpi-label"><IconTrending size={13} /> Açık Fırsat Tutarı</div>
               <div className="kpi-value">{formatTry(kpis.openAmountTry)}</div>
-              <div className="kpi-sub">{kpis.dealCount} fırsat kaydı</div>
+              <div className="kpi-sub">
+                {formatUsd(kpis.openAmountUsd)} · {kpis.dealCount} fırsat kaydı
+              </div>
             </div>
 
             <button
@@ -157,6 +176,18 @@ export function Dashboard() {
               <div className="kpi-sub">{kpis.activeContracts} aktif sözleşme</div>
             </button>
           </div>
+
+          {/*
+            Tutarlar kayıt anındaki kurla değil, ANLIK kurla değerlenir.
+            Kullanıcı hangi kurun kullanıldığını bilmeli — aksi halde iki
+            farklı zamanda açılan ekranlardaki fark hata sanılır.
+          */}
+          {valuationLabel(data.valuation?.valuedAt) && (
+            <p className="text-xs text-muted mb-4">
+              Döviz tutarları bugünkü {valuationLabel(data.valuation?.valuedAt)} TL karşılığına
+              çevrilmiştir. Sözleşme ve onaylı tekliflerde imza tarihindeki kur ayrıca gösterilir.
+            </p>
+          )}
 
           <div className="grid grid-4 mb-4">
             <button

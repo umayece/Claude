@@ -39,7 +39,7 @@ export function DealKanban({
   deals, stages, onStageChange, onEdit, onDelete, onCreateOffer, canWrite, canDelete,
 }: Props) {
   const navigate = useNavigate();
-  const { format } = useExchangeRates();
+  const { format, formatCompact, value } = useExchangeRates();
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropStage, setDropStage] = useState<string | null>(null);
@@ -78,8 +78,13 @@ export function DealKanban({
     <div className="kanban">
       {stages.map((stage) => {
         const items = byStage.get(stage) ?? [];
+        // Kolon toplamı ANLIK kurla hesaplanır; sunucu değeri yoksa
+        // istemci aynı kur haritasıyla aynı sonucu üretir.
         const total = items.reduce(
-          (sum, d) => sum + (d.amountTry ?? d.amount * d.exchangeRate), 0,
+          (sum, d) => sum + (d.amountTry ?? value(d.amount, d.currency).amountTry), 0,
+        );
+        const totalUsd = items.reduce(
+          (sum, d) => sum + (d.amountUsd ?? value(d.amount, d.currency).amountUsd), 0,
         );
         const color = STAGE_COLORS[stage] ?? '#64748b';
 
@@ -111,7 +116,12 @@ export function DealKanban({
               <span className="kanban-column-count">{items.length}</span>
             </div>
 
-            <div className="kanban-column-total">{format(total, 'TRY')}</div>
+            <div className="kanban-column-total">
+              {formatCompact(total, 'TRY')}
+              <span className="dual-secondary" style={{ marginLeft: 6 }}>
+                ≈ {formatCompact(totalUsd, 'USD')}
+              </span>
+            </div>
 
             <div className="kanban-column-body">
               {items.length === 0 && (
@@ -150,8 +160,17 @@ export function DealKanban({
                   )}
 
                   <div className="kanban-card-foot">
-                    <span className="kanban-card-amount">
-                      {format(deal.amount, deal.currency)}
+                    <span className="dual-amount">
+                      <span className="kanban-card-amount">
+                        {format(deal.amount, deal.currency)}
+                      </span>
+                      {deal.currency !== 'TRY' && (
+                        <span className="dual-secondary">
+                          ≈ {formatCompact(
+                            deal.amountTry ?? value(deal.amount, deal.currency).amountTry, 'TRY',
+                          )}
+                        </span>
+                      )}
                     </span>
                     {deal.winProbabilityScore !== null && (
                       <span className={

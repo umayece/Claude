@@ -214,18 +214,10 @@ API anahtarı **Ayarlar → AI Sağlayıcı** bölümünden girilebilir; veritab
 AES-256-GCM ile şifreli saklanır ve API yanıtlarında asla düz metin dönmez
 (yalnızca maskelenmiş önizleme). Sunucuyu yeniden başlatmak gerekmez.
 
-### Döviz kuru: donmuş vs. güncel
+### Döviz kuru
 
-Parasal kayıtlar yazıldıkları andaki kuru `exchangeRate` alanında
-**dondurur** — kur hareketi geçmiş tutarı kaydırmaz. Bu, ekranın "kur yanlış
-hesaplanıyor" izlenimi vermesinin nedenidir: gösterilen TL değeri kayıt
-anındaki kurdur. `dualAmount()` yardımcısı ikisini birlikte üretir:
-muhasebe değeri (donmuş kur) ve bugünkü piyasa değeri (güncel kur), USD
-karşılığıyla birlikte.
-
-TCMB'ye erişimi olmayan kurulumlar için **elle kur girişi** vardır
-(`PUT /api/v1/exchange-rates`, Ayarlar ekranından). Kaynak `MANUEL` olarak
-işaretlenir; bir sonraki başarılı senkronizasyon üzerine yazar.
+Değerleme **anlıktır**; kur yalnızca resmiyet kazanmış belgelerde donar.
+Ayrıntı için aşağıdaki "Kur mimarisi — anlık değerleme" bölümüne bakın.
 
 ### Uluslararası lokasyon desteği
 
@@ -251,15 +243,85 @@ Harita karoları **anahtarsız** OpenStreetMap sunucusundan gelir
 (`tile.openstreetmap.org`). Anahtar isteyen bir sağlayıcıya geçilirse
 karoların üzerine filigran basılır.
 
-### TCMB kur senkronizasyonu
+### Kur mimarisi — anlık değerleme
 
-Günde bir kez `today.xml` çekilir. Dışarı giden tek bilgi "kur listesi
-istiyorum"dur — gövdede, sorgu dizesinde veya başlıkta hiçbir müşteri verisi
-yoktur. İnternet yoksa **veritabanındaki son geçerli kur korunur** (silinmez,
-1.0'a düşürülmez); arayüz kurun 24 saatten eski olduğunu kullanıcıya bildirir.
+**Kayıtlar veritabanında yalnızca kendi para birimiyle saklanır.** Bir fırsat
+100.000 USD ise DB'de `amount = 100000, currency = 'USD'` yazar; TL karşılığı
+**hiçbir yerde saklanmaz**. Liste, gösterge paneli ve hunide TL/USD karşılığı
+**istek anında** hesaplanır (`currency.service.liveValue`). Bir ay önce girilen
+100.000 $'lık fırsat, bugün bakıldığında bugünkü kurla görünür.
 
-Kur, parasal kayıtlara yazıldığı anda `exchangeRate` alanında **dondurulur**;
-sonraki kur hareketleri geçmiş tutarları kaydırmaz.
+Tek istisna **resmiyet kazanmış belgelerdir**: sözleşmeler ve onaylanmış
+teklifler. Bunlarda `exchangeRateAtCreation` alanı doldurulur ve arayüzde iki
+değer yan yana gösterilir:
+
+> İmza Tarihindeki Değeri: 3.180.000 ₺ — Güncel Piyasa Değeri: 4.240.000 ₺
+
+Hangi kaydın donacağına `shouldFreezeRate(entity, status)` karar verir:
+sözleşmede `status !== 'Taslak'`, teklifte `status ∈ {Gönderildi, Kabul}`.
+Taslak hâldeyken kur donmaz — henüz bağlayıcı bir belge yoktur.
+
+`exchangeRateAtCreation` alanı Prisma'da `@map("exchangeRate")` ile eski sütun
+adına bağlıdır: **veri kaybı olmadan** yeniden adlandırma.
+
+#### Senkronizasyon
+
+`exchangeRateSync.ts` üç katmanlıdır:
+
+1. **TCMB** `today.xml` — resmî efektif satış kuru.
+2. **Frankfurter (ECB)** — TCMB erişilemezse anahtarsız yedek kaynak.
+3. **Son geçerli kur** — ikisi de erişilemezse veritabanındaki değer korunur
+   (silinmez, 1.0'a düşürülmez).
+
+Sıklık sabit değildir: `isTcmbBusinessWindow()` `Europe/Istanbul` saatiyle
+Pazartesi–Cuma 08:00–20:00 aralığında **30 dakikada bir** (`EXCHANGE_SYNC_INTERVAL_MINUTES`),
+dışında 4 saatte bir çeker. Hafta sonu ve gece TCMB zaten yeni kur yayınlamaz.
+
+Dışarı giden tek bilgi "kur listesi istiyorum"dur — gövdede, sorgu dizesinde
+veya başlıkta hiçbir müşteri verisi yoktur.
+
+#### Arayüz
+
+Sol alttaki USD/EUR göstergesi (`RateWidget.tsx`) canlı piyasa değerini
+gösterir; tıklanınca para birimi başına kur, kaynak etiketi
+(`TCMB efektif satış` / `ECB referans (yedek)` / `Elle girilmiş`), tazelik
+uyarısı ve **"Kurları Şimdi Güncelle"** düğmesi (ADMIN/MANAGER) açılır.
+`useExchangeRates` modül düzeyinde önbellek + abone kümesi tutar: bir bileşende
+yapılan yenileme **tüm ekranı** aynı anda günceller.
+
+Ağ tamamen kapalıysa elle kur girişi (`setManualRate`) kaynağı `MANUEL` olarak
+işaretler ve arayüz bunu açıkça yazar.
+
+---
+
+## Marka kimliği
+
+Uygulama MKE A.Ş. kurumsal kimlik kılavuzuna göre giydirilmiştir.
+
+| Rol | Değer | Kullanım |
+| --- | --- | --- |
+| Ana renk | `#002845` (Pantone 2965 C) | Sidebar, üst bar, birincil düğme, modal başlığı |
+| Vurgu | `#45B4AA` (Pantone 15-5519 TPX) | Aktif sekme, Kanban ilerleme çubuğu, rozet, CTA |
+| Zemin | `#F8FAFC` | Sayfa arka planı |
+| Çizgi | `#C4C7C8` (Pantone 428 C) | Kenarlık, ayraç |
+
+**Tipografi.** Başlık, modül adı, KPI sayacı ve tablo sütun başlıkları
+**Barlow Condensed** (SemiBold/Bold, `--font-display`); form, tablo ve gövde
+metni **Inter**. Fontlar `index.html` içinden Google Fonts ile yüklenir —
+**kapalı ağda bu istek sessizce başarısız olur** ve CSS'teki sistem font
+zinciri devreye girer, arayüz bozulmaz.
+
+**Geometrik doku.** Kılavuz s.22'deki çift çeperli sekiz köşeli Türk Yıldızı
+(`MkeStar.tsx`) filigran olarak üç yerde kullanılır: giriş ekranı (%5),
+sidebar alt köşesi (%6) ve boş durum ekranları (%4). Boş durumlarda motif
+29 ayrı çağrı noktasına bileşen eklenmesin diye `.empty-state::before`
+pseudo-element'inde **data-URI SVG** olarak gömülüdür — ek ağ isteği yok,
+DOM'a düğüm eklenmez, ekran okuyucu okumaz.
+
+**Yüzeyler.** Kartlar `rounded-xl` ve
+`box-shadow: 0 4px 20px -2px rgba(0, 40, 69, 0.08)`; tablo satırlarında yumuşak
+turkuaz hover; durum etiketleri tek tip hap (pill) rozet — yarı saydam zemin +
+doygun metin rengi.
 
 ---
 

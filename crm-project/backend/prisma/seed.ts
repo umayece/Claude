@@ -499,8 +499,9 @@ async function seedDeals(companyIndex: Map<string, string>): Promise<void> {
           stage,
           amount,
           currency,
-          // Kur kayıt anında dondurulur (canlı kurla yeniden hesaplanmaz).
-          exchangeRate: rates[currency] ?? 1,
+          // Fırsatlarda kur DONDURULMAZ: değerleme anlık kurla yapılır.
+          // Bu alan yalnızca "kayıt anında kur neydi" denetim izidir.
+          exchangeRateAtCreation: rates[currency] ?? 1,
           expectedCloseDate: new Date(Date.now() + ((counter % 14) - 4) * 15 * 86_400_000),
           description: 'Tohum verisi ile oluşturulmuş örnek satış fırsatı.',
           winProbabilityScore: stage === 'Kazanıldı' ? 100 : stage === 'Kaybedildi' ? 0 : 20 + (counter % 70),
@@ -535,7 +536,7 @@ async function seedTenders(companyIndex: Map<string, string>): Promise<void> {
         status: pick(['Takipte', 'Şartname Alındı', 'Teklif Hazırlanıyor', 'Teklif Verildi', 'Değerlendirmede'], i),
         method: 'Açık İhale',
         currency,
-        exchangeRate: currency === 'TRY' ? 1 : 42.15,
+        exchangeRateAtCreation: currency === 'TRY' ? 1 : 42.15,
         estimatedValue: currency === 'TRY' ? 12_000_000 + i * 4_000_000 : 400_000 + i * 120_000,
         announcementDate: new Date(Date.now() - (20 + i * 3) * 86_400_000),
         submissionDeadline: new Date(Date.now() + ((i % 9) - 2) * 10 * 86_400_000),
@@ -573,8 +574,9 @@ async function seedExchangeRates(): Promise<void> {
   for (const seed of seeds) {
     await prisma.exchangeRateCache.upsert({
       where: { code: seed.code },
+      // Mevcut kur korunur: tohum verisi canlı kurun üzerine yazmamalı.
       update: {},
-      create: { ...seed, source: 'SEED' },
+      create: { ...seed, source: 'SEED', rateDate: new Date() },
     });
   }
   console.log('✔ Başlangıç kurları yüklendi.');

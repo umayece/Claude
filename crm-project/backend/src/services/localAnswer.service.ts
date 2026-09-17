@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma';
-import { getRateMap, toTry } from './currency.service';
+import { getRateMap, toTryAt } from './currency.service';
 
 /**
  * Yerel kural tabanlı yanıt motoru.
@@ -138,16 +138,17 @@ async function weekEvents(scope: AnswerScope): Promise<string> {
 async function dealTotals(scope: AnswerScope): Promise<string> {
   const deals = await prisma.deal.findMany({
     where: { deletedAt: null, company: scope.companyWhere },
-    select: { stage: true, amount: true, currency: true, exchangeRate: true },
+    select: { stage: true, amount: true, currency: true },
   });
 
   if (deals.length === 0) return `${header('Satış Fırsatları')}Kayıtlı fırsat bulunamadı.`;
 
+  const rates = await getRateMap();
   const byStage = new Map<string, { count: number; total: number }>();
   for (const deal of deals) {
     const bucket = byStage.get(deal.stage) ?? { count: 0, total: 0 };
     bucket.count += 1;
-    bucket.total += toTry(deal.amount, deal.exchangeRate);
+    bucket.total += toTryAt(deal.amount, deal.currency, rates);
     byStage.set(deal.stage, bucket);
   }
 
@@ -169,7 +170,7 @@ async function dealTotals(scope: AnswerScope): Promise<string> {
   if (won && lost && won.count + lost.count > 0) {
     out += `\n**Kazanma oranı:** %${Math.round((won.count / (won.count + lost.count)) * 100)}`;
   }
-  out += "\n\n_Tutarlar kayıt anındaki (donmuş) kurla TL'ye çevrilmiştir._";
+  out += "\n\n_Tutarlar GÜNCEL kurla TL'ye çevrilmiştir._";
   return out;
 }
 
@@ -362,7 +363,7 @@ async function overview(scope: AnswerScope): Promise<string> {
     prisma.company.count({ where: { deletedAt: null, ...scope.companyWhere } }),
     prisma.deal.findMany({
       where: { deletedAt: null, company: scope.companyWhere },
-      select: { stage: true, amount: true, exchangeRate: true },
+      select: { stage: true, amount: true, currency: true },
     }),
     prisma.tender.count({
       where: {
@@ -380,14 +381,13 @@ async function overview(scope: AnswerScope): Promise<string> {
     prisma.protocolVisit.count({ where: { deletedAt: null, startDate: { gte: new Date() } } }),
   ]);
 
+  const rates = await getRateMap();
   const openValue = deals
     .filter((d) => d.stage !== 'Kazanıldı' && d.stage !== 'Kaybedildi')
-    .reduce((sum, d) => sum + toTry(d.amount, d.exchangeRate), 0);
+    .reduce((sum, d) => sum + toTryAt(d.amount, d.currency, rates), 0);
   const wonValue = deals
     .filter((d) => d.stage === 'Kazanıldı')
-    .reduce((sum, d) => sum + toTry(d.amount, d.exchangeRate), 0);
-
-  const rates = await getRateMap();
+    .reduce((sum, d) => sum + toTryAt(d.amount, d.currency, rates), 0);
 
   return [
     header('Genel Durum'),

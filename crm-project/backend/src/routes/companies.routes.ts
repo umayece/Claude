@@ -12,7 +12,7 @@ import { companyScope, assertCompanyAccess } from '../middleware/rbac';
 import { validate, validated } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import { logActivity } from '../services/activity.service';
-import { toTry } from '../services/currency.service';
+import { getRateMap, toTryAt } from '../services/currency.service';
 
 const router = Router();
 router.use(authenticate, requireMfaComplete);
@@ -266,18 +266,22 @@ router.get(
         },
         deals: {
           where: { deletedAt: null, stage: 'Kazanıldı' },
-          select: { amount: true, exchangeRate: true },
+          select: { amount: true, currency: true },
         },
         _count: { select: { tenders: { where: { deletedAt: null } } } },
       },
     });
 
+    // Harita cirosu da anlık kurla değerlenir.
+    const rates = await getRateMap();
     const points = rows
       .map((row) => {
         const latitude = row.latitude ?? row.city?.latitude ?? null;
         const longitude = row.longitude ?? row.city?.longitude ?? null;
         if (latitude === null || longitude === null) return null;
-        const revenueTry = row.deals.reduce((sum, d) => sum + toTry(d.amount, d.exchangeRate), 0);
+        const revenueTry = row.deals.reduce(
+          (sum, d) => sum + toTryAt(d.amount, d.currency, rates), 0,
+        );
         return {
           id: row.id,
           name: row.name,
@@ -370,9 +374,10 @@ router.get(
     });
     if (!company) throw NotFound('Şirket bulunamadı.');
 
+    const rates = await getRateMap();
     const revenueTry = company.deals
       .filter((d) => d.stage === 'Kazanıldı')
-      .reduce((sum, d) => sum + toTry(d.amount, d.exchangeRate), 0);
+      .reduce((sum, d) => sum + toTryAt(d.amount, d.currency, rates), 0);
 
     res.json({ ...serialize(company as unknown as CompanyWithRelations), revenueTry, contacts: company.contacts, deals: company.deals, tenders: company.tenders, contracts: company.contracts, tickets: company.tickets });
   }),

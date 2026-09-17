@@ -6,7 +6,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { authenticate, requireMfaComplete } from '../middleware/auth';
 import { requirePermission, companyScope } from '../middleware/rbac';
 import { validate, validated } from '../middleware/validate';
-import { toTry } from '../services/currency.service';
+import { getRateMap, toTryAt } from '../services/currency.service';
 import { DEAL_STAGES } from './deals.routes';
 
 const router = Router();
@@ -66,7 +66,7 @@ router.get(
       prisma.contact.count({ where: { AND: [{ deletedAt: null }, { company: scope }] } }),
       prisma.deal.findMany({
         where: dealWhere,
-        select: { stage: true, amount: true, exchangeRate: true, createdAt: true },
+        select: { stage: true, amount: true, currency: true, createdAt: true },
       }),
       prisma.tender.count({
         where: {
@@ -104,6 +104,9 @@ router.get(
       }),
     ]);
 
+    // Tüm tutarlar İSTEK ANINDAKİ kurla değerlenir; dondurulmuş kur yok.
+    const rates = await getRateMap();
+
     // Huni: aşama bazlı adet, TL toplam ve bir önceki aşamadan dönüşüm.
     const funnel = DEAL_STAGES.filter((s) => s !== 'Kaybedildi').map((stage, index, list) => {
       const items = deals.filter((d) => d.stage === stage);
@@ -114,7 +117,7 @@ router.get(
       return {
         stage,
         count: items.length,
-        totalTry: Math.round(items.reduce((s, d) => s + toTry(d.amount, d.exchangeRate), 0) * 100) / 100,
+        totalTry: Math.round(items.reduce((s, d) => s + toTryAt(d.amount, d.currency, rates), 0) * 100) / 100,
         conversionRate:
           previousCount && previousCount > 0
             ? Math.round((items.length / previousCount) * 1000) / 10
@@ -127,7 +130,9 @@ router.get(
     const open = deals.filter((d) => d.stage !== 'Kazanıldı' && d.stage !== 'Kaybedildi');
 
     const sumTry = (rows: typeof deals) =>
-      Math.round(rows.reduce((s, d) => s + toTry(d.amount, d.exchangeRate), 0) * 100) / 100;
+      Math.round(rows.reduce((s, d) => s + toTryAt(d.amount, d.currency, rates), 0) * 100) / 100;
+    const sumUsd = (rows: typeof deals) =>
+      Math.round((sumTry(rows) / (rates.USD || 1)) * 100) / 100;
 
     // Zaman serisi: aralığı günlük kovalara böler (grafik ekseni için).
     const dayCount = Math.min(180, Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000)));
@@ -156,11 +161,15 @@ router.get(
         wonCount: won.length,
         lostCount: lost.length,
         wonAmountTry: sumTry(won),
+        wonAmountUsd: sumUsd(won),
         openAmountTry: sumTry(open),
+        openAmountUsd: sumUsd(open),
         winRate: won.length + lost.length > 0
           ? Math.round((won.length / (won.length + lost.length)) * 1000) / 10
           : null,
       },
+      // Değerlemenin hangi kurla yapıldığı arayüzde gösterilir.
+      valuation: { valuedAt: new Date().toISOString(), rates },
       funnel,
       lossReasons: lossRows
         .map((r) => ({ reason: r.lossReason ?? 'Belirtilmemiş', count: r._count._all }))

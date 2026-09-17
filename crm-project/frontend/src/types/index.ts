@@ -170,9 +170,13 @@ export interface Deal {
   ownerId: string | null;
   stage: string;
   amount: number;
-  amountTry?: number;
   currency: CurrencyCode;
-  exchangeRate: number;
+  /** Denetim izi — değerlemede KULLANILMAZ. */
+  exchangeRateAtCreation?: number | null;
+  /** Sunucunun anlık kurla hesapladığı karşılıklar. */
+  amountTry?: number;
+  amountUsd?: number;
+  rate?: number;
   expectedCloseDate: string | null;
   description: string | null;
   winProbabilityScore: number | null;
@@ -193,9 +197,11 @@ export interface Tender {
   status: string;
   method: string | null;
   currency: CurrencyCode;
-  exchangeRate: number;
+  exchangeRateAtCreation?: number | null;
   estimatedValue: number;
   estimatedValueTry?: number;
+  amountTry?: number;
+  amountUsd?: number;
   submissionDeadline: string | null;
   announcementDate: string | null;
   description: string | null;
@@ -232,11 +238,15 @@ export interface Offer {
   dealId: string | null;
   status: string;
   currency: CurrencyCode;
-  exchangeRate: number;
+  exchangeRateAtCreation?: number | null;
   subtotal: number;
   taxTotal: number;
   total: number;
   totalTry?: number;
+  amountTry?: number;
+  amountUsd?: number;
+  amountTryAtCreation?: number | null;
+  hasDrift?: boolean;
   validUntil: string | null;
   notes: string | null;
   terms: string | null;
@@ -250,9 +260,12 @@ export interface PaymentMilestone {
   contractId: string;
   title: string;
   amount: number;
-  amountTry?: number;
   currency: CurrencyCode;
-  exchangeRate: number;
+  exchangeRateAtCreation?: number | null;
+  amountTry?: number;
+  amountUsd?: number;
+  amountTryAtCreation?: number | null;
+  hasDrift?: boolean;
   dueDate: string;
   status: string;
   effectiveStatus?: string;
@@ -273,9 +286,15 @@ export interface Contract {
   tenderId: string | null;
   status: string;
   amount: number;
-  amountTry?: number;
   currency: CurrencyCode;
-  exchangeRate: number;
+  /** İmza tarihindeki kur; taslak sözleşmelerde null. */
+  exchangeRateAtCreation?: number | null;
+  amountTry?: number;
+  amountUsd?: number;
+  amountTryAtCreation?: number | null;
+  differenceTry?: number | null;
+  driftPercent?: number | null;
+  hasDrift?: boolean;
   startDate: string | null;
   endDate: string | null;
   renewalDate: string | null;
@@ -439,8 +458,27 @@ export interface AuditLog {
 export interface ExchangeRate {
   code: CurrencyCode;
   rate: number;
+  /** TCMB | FALLBACK_ECB | MANUEL | SEED | SABIT */
   source: string;
+  /** Kaynağın yayınladığı değerleme tarihi. */
+  rateDate: string | null;
   updatedAt: string;
+}
+
+/** Anlık değerleme — listeler ve panolar bunu kullanır. */
+export interface LiveValuation {
+  amountTry: number;
+  amountUsd: number;
+  rate: number;
+}
+
+/** Resmî belgeler için çift değerleme (imza tarihi + güncel piyasa). */
+export interface DualValuation extends LiveValuation {
+  rateAtCreation: number | null;
+  amountTryAtCreation: number | null;
+  differenceTry: number | null;
+  driftPercent: number | null;
+  hasDrift: boolean;
 }
 
 export interface CustomFieldDefinition {
@@ -459,6 +497,7 @@ export interface FunnelStage {
   stage: string;
   count: number;
   totalTry: number;
+  totalUsd?: number;
   conversionRate: number | null;
 }
 
@@ -476,9 +515,12 @@ export interface DashboardData {
     wonCount: number;
     lostCount: number;
     wonAmountTry: number;
+    wonAmountUsd: number;
     openAmountTry: number;
+    openAmountUsd: number;
     winRate: number | null;
   };
+  valuation?: { valuedAt: string; rates: Record<string, number> };
   funnel: FunnelStage[];
   lossReasons: { reason: string; count: number }[];
   series: { date: string; count: number; totalTry: number }[];
