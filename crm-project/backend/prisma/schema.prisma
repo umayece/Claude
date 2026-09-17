@@ -146,16 +146,26 @@ model AuditLog {
 // Coğrafya
 // ---------------------------------------------------------------------------
 
+/// Hem Türkiye illerini hem uluslararası şehirleri tutar.
+/// MKE yurt dışı pazarlarda da çalıştığı için şehir listesi ülkeye göre bölünür.
 model City {
-  id        String  @id @default(uuid())
-  name      String  @unique
-  plateCode Int     @unique
-  latitude  Float
-  longitude Float
-  region    String?
+  id          String  @id @default(uuid())
+  name        String
+  /// ISO 3166-1 alpha-2 — TR, DE, AE, QA ...
+  countryCode String  @default("TR")
+  country     String  @default("Türkiye")
+  /// Yalnızca Türkiye illerinde dolu; yurt dışı şehirlerde null.
+  plateCode   Int?
+  latitude    Float
+  longitude   Float
+  region      String?
 
   companies Company[]
 
+  // Şehir adı küresel olarak benzersiz DEĞİLDİR (ör. Tripoli/LB ve Tripoli/LY).
+  // Benzersizlik ülke ile birlikte tanımlanır.
+  @@unique([countryCode, name])
+  @@index([countryCode])
   @@index([name])
 }
 
@@ -175,7 +185,13 @@ model Company {
   taxNumber    String?
   taxOffice    String?
   address      String?
+  country      String      @default("Türkiye")
+  /// ISO 3166-1 alpha-2
+  countryCode  String      @default("TR")
   cityId       String?
+  /// Şehir listesinde bulunmayan (çoğunlukla yurt dışı) lokasyonlar için
+  /// serbest metin. `cityId` doluysa görüntülemede o kaydın adı önceliklidir.
+  cityName     String?
   districtName String?
   latitude     Float?
   longitude    Float?
@@ -212,6 +228,8 @@ model Company {
   @@index([ownerId])
   @@index([createdAt])
   @@index([latitude, longitude])
+  @@index([countryCode])
+  @@index([countryCode, type])
 }
 
 model Contact {

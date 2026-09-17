@@ -48,6 +48,9 @@ const listQuerySchema = z.object({
   stage: z.enum(DEAL_STAGES).optional(),
   companyId: z.string().uuid().optional(),
   ownerId: z.string().uuid().optional(),
+  /// Konum şirket üzerinde tutulur; kapsam ilişki üzerinden süzülür.
+  scope: z.enum(['domestic', 'international']).optional(),
+  countryCode: z.string().trim().length(2).toUpperCase().optional(),
   sort: z.string().max(40).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
@@ -55,7 +58,7 @@ const listQuerySchema = z.object({
 type ListQuery = z.infer<typeof listQuerySchema>;
 
 const dealInclude = {
-  company: { select: { id: true, name: true, type: true } },
+  company: { select: { id: true, name: true, type: true, country: true, countryCode: true } },
   contact: { select: { id: true, firstName: true, lastName: true } },
   owner: { select: { id: true, name: true } },
 } satisfies Prisma.DealInclude;
@@ -111,6 +114,9 @@ router.get(
     if (query.stage) and.push({ stage: query.stage });
     if (query.companyId) and.push({ companyId: query.companyId });
     if (query.ownerId) and.push({ ownerId: query.ownerId });
+    if (query.countryCode) and.push({ company: { countryCode: query.countryCode } });
+    if (query.scope === 'domestic') and.push({ company: { countryCode: 'TR' } });
+    if (query.scope === 'international') and.push({ company: { countryCode: { not: 'TR' } } });
     if (query.q) and.push({ title: { contains: query.q, mode: 'insensitive' } });
     if (query.from || query.to) {
       and.push({ createdAt: { ...(query.from ? { gte: query.from } : {}), ...(query.to ? { lte: query.to } : {}) } });

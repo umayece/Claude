@@ -53,6 +53,7 @@ export function Tenders() {
 
   const [term, setTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [scopeFilter, setScopeFilter] = useState<'' | 'domestic' | 'international'>('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useLocalStorage('crm:tenders:pageSize', 25);
 
@@ -79,7 +80,12 @@ export function Tenders() {
     try {
       const response = await api.get<Paginated<Tender>>(
         '/tenders',
-        { page, pageSize, q: debouncedTerm || undefined, status: statusFilter || undefined },
+        {
+          page, pageSize,
+          q: debouncedTerm || undefined,
+          status: statusFilter || undefined,
+          scope: scopeFilter || undefined,
+        },
         signal,
       );
       setResult(response);
@@ -89,7 +95,7 @@ export function Tenders() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, statusFilter]);
+  }, [page, pageSize, debouncedTerm, statusFilter, scopeFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,7 +103,7 @@ export function Tenders() {
     return () => controller.abort();
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [debouncedTerm, statusFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [debouncedTerm, statusFilter, scopeFilter, pageSize]);
 
   useEffect(() => {
     if (!formOpen) return;
@@ -269,6 +275,18 @@ export function Tenders() {
           >
             <option value="">Tüm durumlar</option>
             {TENDER_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+          </select>
+
+          <select
+            className="select" style={{ width: 'auto' }}
+            value={scopeFilter}
+            onChange={(event) =>
+              setScopeFilter(event.target.value as '' | 'domestic' | 'international')}
+            aria-label="Kapsam filtresi"
+          >
+            <option value="">Yurt içi + yurt dışı</option>
+            <option value="domestic">Yalnızca yurt içi</option>
+            <option value="international">Yalnızca yurt dışı</option>
           </select>
         </div>
 

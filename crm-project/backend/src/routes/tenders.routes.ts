@@ -58,7 +58,7 @@ const listQuerySchema = z.object({
 type ListQuery = z.infer<typeof listQuerySchema>;
 
 const tenderInclude = {
-  company: { select: { id: true, name: true, type: true } },
+  company: { select: { id: true, name: true, type: true, country: true, countryCode: true } },
   _count: { select: { contracts: true, tasks: true } },
 } satisfies Prisma.TenderInclude;
 
@@ -111,6 +111,9 @@ router.get(
     const and: Prisma.TenderWhereInput[] = [{ deletedAt: null }, { company: companyScope(req.user) }];
     if (query.status) and.push({ status: query.status });
     if (query.companyId) and.push({ companyId: query.companyId });
+    if (query.countryCode) and.push({ company: { countryCode: query.countryCode } });
+    if (query.scope === 'domestic') and.push({ company: { countryCode: 'TR' } });
+    if (query.scope === 'international') and.push({ company: { countryCode: { not: 'TR' } } });
     if (query.q) {
       and.push({
         OR: [

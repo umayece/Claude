@@ -5,21 +5,28 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { MapPoint } from '../types';
 import { HeatCanvasLayer, type HeatPoint } from './HeatCanvasLayer';
-import { IconRefresh } from './Icons';
+import { IconRefresh, IconMap } from './Icons';
 
-type FilterKey = 'ALL' | 'TENDERS' | 'B2G' | 'B2C' | 'RECENT';
+type TypeFilter = 'ALL' | 'B2G' | 'B2B' | 'B2C';
+type ScopeFilter = 'ALL' | 'TR' | 'INTL';
 
-const FILTERS: { key: FilterKey; label: string }[] = [
+const TYPE_FILTERS: { key: TypeFilter; label: string }[] = [
   { key: 'ALL', label: 'Tümü' },
-  { key: 'TENDERS', label: 'İhaleler' },
   { key: 'B2G', label: 'B2G' },
+  { key: 'B2B', label: 'B2B' },
   { key: 'B2C', label: 'B2C' },
-  { key: 'RECENT', label: 'Son 30 Gün' },
 ];
 
-// Türkiye odaklı başlangıç görünümü.
+const SCOPE_FILTERS: { key: ScopeFilter; label: string }[] = [
+  { key: 'ALL', label: 'Tümü' },
+  { key: 'TR', label: 'Yurt İçi' },
+  { key: 'INTL', label: 'Yurt Dışı' },
+];
+
+// Varsayılan görünüm Türkiye odaklıdır, ancak harita küreseldir:
+// veri yurt dışına yayıldığında `fitToData()` tüm noktaları kadraja alır.
 const TURKEY_CENTER: L.LatLngExpression = [39.0, 35.0];
-const INITIAL_ZOOM = 6;
+const TURKEY_ZOOM = 6;
 
 function formatTry(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} M ₺`;
@@ -27,7 +34,6 @@ function formatTry(value: number): string {
   return `${value.toLocaleString('tr-TR')} ₺`;
 }
 
-/** Kurum tipine göre pin rengi. */
 function pinColor(type: string): string {
   switch (type) {
     case 'B2G': return '#4f46e5';
@@ -42,10 +48,16 @@ export function MapView() {
   const mapRef = useRef<L.Map | null>(null);
   const heatRef = useRef<HeatCanvasLayer | null>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
+  // İlk veri yüklemesinde kadrajı bir kez otomatik ayarlarız; sonraki
+  // filtre değişimlerinde kullanıcının konumunu zorla değiştirmeyiz.
+  const didAutoFit = useRef(false);
   const navigate = useNavigate();
 
   const [points, setPoints] = useState<MapPoint[]>([]);
-  const [filter, setFilter] = useState<FilterKey>('ALL');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('ALL');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('ALL');
+  const [onlyTenders, setOnlyTenders] = useState(false);
+  const [onlyRecent, setOnlyRecent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,23 +67,27 @@ export function MapView() {
 
     const map = L.map(containerRef.current, {
       center: TURKEY_CENTER,
-      zoom: INITIAL_ZOOM,
+      zoom: TURKEY_ZOOM,
       // Sonsuz yatay tekrar kapalı: dünya sağa doğru kopyalanmaz.
       worldCopyJump: false,
-      minZoom: 3,
+      // minZoom 2: tüm dünya tek ekranda görülebilsin (yurt dışı kayıtlar için).
+      minZoom: 2,
       maxZoom: 16,
       zoomControl: true,
       attributionControl: true,
-      // Kullanıcı dünya sınırlarının dışına kayamaz.
       maxBounds: L.latLngBounds([-85, -180], [85, 180]),
       maxBoundsViscosity: 1,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap katkıcıları &copy; CARTO',
-      subdomains: 'abcd',
+    // Anahtarsız standart OpenStreetMap karo sunucusu.
+    // (Carto/Mapbox gibi sağlayıcılar artık anahtar istediği için
+    // haritaya "API KEY REQUIRED" filigranı basıyordu.)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      subdomains: 'abc',
       maxZoom: 19,
-      // Döşemeler de tekrarlanmaz; harita tek bir dünya gösterir.
+      // Döşemeler tekrarlanmaz; harita tek bir dünya gösterir.
       noWrap: true,
       bounds: L.latLngBounds([-85, -180], [85, 180]),
     }).addTo(map);
@@ -99,7 +115,7 @@ export function MapView() {
     try {
       const response = await api.get<{ data: MapPoint[]; meta: { total: number; capped: boolean } }>(
         '/companies/map',
-        { pageSize: 200 },
+        undefined,
         signal,
       );
       setPoints(response.data);
@@ -117,18 +133,38 @@ export function MapView() {
     return () => controller.abort();
   }, [load]);
 
-  // --- Filtre uygulaması (istemci tarafında; veri seti sınırlı) ---
+  // --- Filtreler bağımsız uygulanır (tip ∧ kapsam ∧ ek koşullar) ---
   const filtered = useMemo(() => {
     const cutoff = Date.now() - 30 * 86_400_000;
-    switch (filter) {
-      case 'TENDERS': return points.filter((p) => p.tenderCount > 0);
-      case 'B2G': return points.filter((p) => p.type === 'B2G');
-      case 'B2C': return points.filter((p) => p.type === 'B2C');
-      case 'RECENT': return points.filter((p) => new Date(p.createdAt).getTime() >= cutoff);
-      case 'ALL':
-      default: return points;
+
+    return points.filter((point) => {
+      if (typeFilter !== 'ALL' && point.type !== typeFilter) return false;
+
+      if (scopeFilter === 'TR' && point.countryCode !== 'TR') return false;
+      if (scopeFilter === 'INTL' && point.countryCode === 'TR') return false;
+
+      if (onlyTenders && point.tenderCount === 0) return false;
+      if (onlyRecent && new Date(point.createdAt).getTime() < cutoff) return false;
+
+      return true;
+    });
+  }, [points, typeFilter, scopeFilter, onlyTenders, onlyRecent]);
+
+  /** Görünür noktaların tamamını kadraja alır. */
+  const fitToData = useCallback((rows: MapPoint[]) => {
+    const map = mapRef.current;
+    if (!map || rows.length === 0) return;
+
+    const bounds = L.latLngBounds(rows.map((p) => [p.latitude, p.longitude] as L.LatLngTuple));
+    if (!bounds.isValid()) return;
+
+    // Tek nokta varsa `fitBounds` aşırı yakınlaşır; makul bir zoom veririz.
+    if (rows.length === 1) {
+      map.setView(bounds.getCenter(), 9);
+      return;
     }
-  }, [points, filter]);
+    map.fitBounds(bounds, { padding: [48, 48], maxZoom: 11 });
+  }, []);
 
   // --- Katmanları güncelle ---
   useEffect(() => {
@@ -185,12 +221,11 @@ export function MapView() {
 
       addRow('Tip', point.type);
       addRow('Durum', point.status);
+      addRow('Ülke', point.country);
       if (point.cityName) addRow('Şehir', point.cityName);
       addRow('Satış Cirosu', formatTry(point.revenueTry));
       if (point.tenderCount > 0) addRow('Aktif İhale', String(point.tenderCount));
-      if (point.coordinateSource === 'CITY') {
-        addRow('Konum', 'Şehir merkezi (yaklaşık)');
-      }
+      if (point.coordinateSource === 'CITY') addRow('Konum', 'Şehir merkezi (yaklaşık)');
 
       const link = document.createElement('a');
       link.className = 'map-popup-link';
@@ -204,13 +239,25 @@ export function MapView() {
       wrapper.appendChild(link);
 
       marker.bindPopup(wrapper, { minWidth: 210 });
-      marker.bindTooltip(point.name, { direction: 'top', offset: [0, -8] });
+      marker.bindTooltip(`${point.name} · ${point.country}`, { direction: 'top', offset: [0, -8] });
       marker.addTo(markers);
     }
-  }, [filtered, navigate]);
+
+    // İlk dolu veri gelişinde kadrajı otomatik ayarla: kayıtlar yalnızca
+    // yurt dışındaysa kullanıcı boş bir Türkiye haritasıyla karşılaşmasın.
+    if (!didAutoFit.current && filtered.length > 0) {
+      didAutoFit.current = true;
+      fitToData(filtered);
+    }
+  }, [filtered, navigate, fitToData]);
 
   const totalRevenue = useMemo(
     () => filtered.reduce((sum, point) => sum + point.revenueTry, 0),
+    [filtered],
+  );
+
+  const countryCount = useMemo(
+    () => new Set(filtered.map((point) => point.countryCode)).size,
     [filtered],
   );
 
@@ -219,17 +266,53 @@ export function MapView() {
       <div className="map-canvas" ref={containerRef} />
 
       <div className="map-filter">
-        <div className="map-filter-title">Harita Filtresi</div>
-        {FILTERS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={`map-filter-btn${filter === item.key ? ' active' : ''}`}
-            onClick={() => setFilter(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
+        <div className="map-filter-title">Müşteri Tipi</div>
+        <div className="flex gap-1 flex-wrap mb-3">
+          {TYPE_FILTERS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`map-filter-btn${typeFilter === item.key ? ' active' : ''}`}
+              style={{ width: 'auto', flex: '1 1 40%', textAlign: 'center' }}
+              onClick={() => setTypeFilter(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="map-filter-title">Kapsam</div>
+        <div className="flex gap-1 flex-wrap mb-3">
+          {SCOPE_FILTERS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`map-filter-btn${scopeFilter === item.key ? ' active' : ''}`}
+              style={{ width: 'auto', flex: '1 1 40%', textAlign: 'center' }}
+              onClick={() => setScopeFilter(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="map-filter-title">Ek Filtre</div>
+        <label className="checkbox-row text-xs mb-1">
+          <input
+            type="checkbox"
+            checked={onlyTenders}
+            onChange={(event) => setOnlyTenders(event.target.checked)}
+          />
+          <span>Yalnızca ihalesi olanlar</span>
+        </label>
+        <label className="checkbox-row text-xs">
+          <input
+            type="checkbox"
+            checked={onlyRecent}
+            onChange={(event) => setOnlyRecent(event.target.checked)}
+          />
+          <span>Son 30 günde eklenen</span>
+        </label>
 
         <div
           className="text-xs text-muted mt-2"
@@ -239,8 +322,11 @@ export function MapView() {
             <span className="flex items-center gap-2"><span className="spinner" /> Yükleniyor…</span>
           ) : (
             <>
-              <div>{filtered.length} kurum</div>
+              <div>{filtered.length} kurum · {countryCount} ülke</div>
               <div>{formatTry(totalRevenue)} ciro</div>
+              {points.length > 0 && filtered.length === 0 && (
+                <div className="text-danger mt-1">Bu filtreyle eşleşen kayıt yok.</div>
+              )}
             </>
           )}
         </div>
@@ -248,6 +334,23 @@ export function MapView() {
         <button
           type="button"
           className="btn btn-sm w-full mt-2"
+          onClick={() => fitToData(filtered)}
+          disabled={filtered.length === 0}
+        >
+          <IconMap size={13} /> Verilere Sığdır
+        </button>
+
+        <button
+          type="button"
+          className="btn btn-sm w-full mt-1"
+          onClick={() => mapRef.current?.setView(TURKEY_CENTER, TURKEY_ZOOM)}
+        >
+          Türkiye'ye Dön
+        </button>
+
+        <button
+          type="button"
+          className="btn btn-sm w-full mt-1"
           onClick={() => void load()}
           disabled={loading}
         >

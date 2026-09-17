@@ -38,8 +38,10 @@ npm install
 npm run dev                     # http://localhost:5173
 ```
 
-Tohum verisi 81 il koordinatını, 4 departmanı, 5 kullanıcıyı, örnek ürün
-kataloğunu ve özel alan tanımlarını yükler.
+Tohum verisi 81 il + 56 uluslararası şehir koordinatını, 5 departmanı,
+6 kullanıcıyı, 45 şirketi (yurt içi + yurt dışı; B2G/B2B/B2C dengeli),
+bunlara bağlı kişileri, satış fırsatlarını ve ihaleleri, ürün kataloğunu ve
+özel alan tanımlarını yükler — harita ilk açılışta dolu gelir.
 Geliştirme şifresi: `MkeCrm!2026` (ör. `admin@mke.gov.tr`).
 
 ---
@@ -177,6 +179,30 @@ sonra oluşan hata `event: error` karesi olarak iletilir.
 
 `ANTHROPIC_API_KEY` tanımlı değilse **hiçbir veri dışarı çıkmaz**; yerel
 kural tabanlı motor CRM kayıtlarından brifing üretir.
+
+### Uluslararası lokasyon desteği
+
+MKE yurt dışı pazarlarda da çalıştığı için konum modeli Türkiye'ye bağlı değildir:
+
+- `City` tablosu hem 81 ili (plaka koduyla) hem uluslararası şehirleri tutar.
+  Benzersizlik `@@unique([countryCode, name])` ile tanımlıdır — şehir adı
+  küresel olarak benzersiz değildir (ör. Tripoli/LB ve Tripoli/LY).
+- `Company.country` + `countryCode` alanları vardır (varsayılan Türkiye/TR).
+  **Şehir seçildiğinde ülke o kayıttan türetilir**, böylece "Berlin seçip
+  ülke Türkiye kalması" gibi tutarsızlık imkânsızdır (`resolveLocation()`).
+- Listede bulunmayan lokasyonlar için `Company.cityName` serbest metin alanı
+  ve elle `latitude`/`longitude` girişi vardır; elle girilen koordinat
+  sunucu tarafından **asla ezilmez**.
+- Şirket, fırsat ve ihale listeleri `?scope=domestic|international` ve
+  `?countryCode=XX` ile süzülür. Fırsat/ihale kaydında konum tekrarlanmaz —
+  filtre şirket ilişkisi üzerinden çalışır, böylece veri tek yerde durur.
+- Harita `minZoom: 2` ile küreseldir; ilk yüklemede görünür kayıtları
+  kadraja alır (kayıtlar yalnızca yurt dışındaysa boş Türkiye haritası
+  görünmez). "Türkiye'ye Dön" ve "Verilere Sığdır" düğmeleri mevcuttur.
+
+Harita karoları **anahtarsız** OpenStreetMap sunucusundan gelir
+(`tile.openstreetmap.org`). Anahtar isteyen bir sağlayıcıya geçilirse
+karoların üzerine filigran basılır.
 
 ### TCMB kur senkronizasyonu
 

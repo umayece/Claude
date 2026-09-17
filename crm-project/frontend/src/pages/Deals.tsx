@@ -59,6 +59,7 @@ export function Deals() {
 
   const [term, setTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('');
+  const [scopeFilter, setScopeFilter] = useState<'' | 'domestic' | 'international'>('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useLocalStorage('crm:deals:pageSize', 25);
 
@@ -83,7 +84,12 @@ export function Deals() {
     try {
       const response = await api.get<Paginated<Deal>>(
         '/deals',
-        { page, pageSize, q: debouncedTerm || undefined, stage: stageFilter || undefined },
+        {
+          page, pageSize,
+          q: debouncedTerm || undefined,
+          stage: stageFilter || undefined,
+          scope: scopeFilter || undefined,
+        },
         signal,
       );
       setResult(response);
@@ -93,7 +99,7 @@ export function Deals() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, stageFilter]);
+  }, [page, pageSize, debouncedTerm, stageFilter, scopeFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -101,7 +107,7 @@ export function Deals() {
     return () => controller.abort();
   }, [load]);
 
-  useEffect(() => { setPage(1); }, [debouncedTerm, stageFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [debouncedTerm, stageFilter, scopeFilter, pageSize]);
 
   useEffect(() => {
     if (!formOpen) return;
@@ -263,6 +269,18 @@ export function Deals() {
           >
             <option value="">Tüm aşamalar</option>
             {DEAL_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+          </select>
+
+          <select
+            className="select" style={{ width: 'auto' }}
+            value={scopeFilter}
+            onChange={(event) =>
+              setScopeFilter(event.target.value as '' | 'domestic' | 'international')}
+            aria-label="Kapsam filtresi"
+          >
+            <option value="">Yurt içi + yurt dışı</option>
+            <option value="domestic">Yalnızca yurt içi</option>
+            <option value="international">Yalnızca yurt dışı</option>
           </select>
         </div>
 

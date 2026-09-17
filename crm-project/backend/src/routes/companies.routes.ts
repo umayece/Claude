@@ -32,7 +32,11 @@ const companyBodySchema = z.object({
   taxNumber: z.string().trim().max(30).nullish(),
   taxOffice: z.string().trim().max(120).nullish(),
   address: z.string().trim().max(1000).nullish(),
+  country: z.string().trim().max(80).default('Türkiye'),
+  countryCode: z.string().trim().length(2).toUpperCase().default('TR'),
   cityId: z.string().uuid().nullish(),
+  /// Şehir listesinde olmayan lokasyonlar için serbest metin.
+  cityName: z.string().trim().max(120).nullish(),
   districtName: z.string().trim().max(120).nullish(),
   latitude: z.number().min(-90).max(90).nullish(),
   longitude: z.number().min(-180).max(180).nullish(),
@@ -50,6 +54,9 @@ const listQuerySchema = z.object({
   status: z.string().trim().max(60).optional(),
   sector: z.string().trim().max(80).optional(),
   cityId: z.string().uuid().optional(),
+  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  /// "domestic" → yalnızca Türkiye, "international" → yurt dışı.
+  scope: z.enum(['domestic', 'international']).optional(),
   ownerId: z.string().uuid().optional(),
   sort: z.string().max(40).optional(),
   /** Harita modunda yalnızca koordinatı çözülebilen kayıtlar döner. */
@@ -61,7 +68,12 @@ const listQuerySchema = z.object({
 type ListQuery = z.infer<typeof listQuerySchema>;
 
 const listInclude = {
-  city: { select: { id: true, name: true, latitude: true, longitude: true } },
+  city: {
+    select: {
+      id: true, name: true, latitude: true, longitude: true,
+      country: true, countryCode: true,
+    },
+  },
   owner: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   _count: { select: { contacts: true, deals: true, tenders: true, contracts: true, tickets: true } },
@@ -104,28 +116,57 @@ function serialize(company: CompanyWithRelations) {
     /** Elle girilmiş ham koordinat — düzenleme formu bunu gösterir. */
     rawLatitude: company.latitude,
     rawLongitude: company.longitude,
+    // Listede bir şehir seçilmişse onun adı, yoksa serbest metin gösterilir.
+    displayCity: company.city?.name ?? company.cityName ?? null,
   };
 }
 
+interface ResolvedLocation {
+  latitude: number | null;
+  longitude: number | null;
+  country: string;
+  countryCode: string;
+}
+
 /**
- * Şehir seçilmiş ama koordinat girilmemişse şehrin koordinatını kalıcı yazar.
- * Kullanıcının elle girdiği koordinat ASLA ezilmez.
+ * Konumu tek yerde çözer.
+ *
+ * - Şehir seçilmişse koordinat ve ÜLKE o kayıttan türetilir; böylece
+ *   "Berlin seçip ülke Türkiye kalması" gibi tutarsızlık imkânsızdır.
+ * - Kullanıcının elle girdiği koordinat ASLA ezilmez (yurt dışı serbest
+ *   metin lokasyonlarda tek konum kaynağı budur).
+ * - Şehir yoksa gövdeden gelen ülke bilgisi kullanılır.
  */
-async function applyCityCoordinates(
-  data: { cityId?: string | null; latitude?: number | null; longitude?: number | null },
-): Promise<{ latitude: number | null; longitude: number | null }> {
+async function resolveLocation(data: {
+  cityId?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  country?: string | null;
+  countryCode?: string | null;
+}): Promise<ResolvedLocation> {
   const latitude = data.latitude ?? null;
   const longitude = data.longitude ?? null;
 
-  if (data.cityId && (latitude === null || longitude === null)) {
+  if (data.cityId) {
     const city = await prisma.city.findUnique({
       where: { id: data.cityId },
-      select: { latitude: true, longitude: true },
+      select: { latitude: true, longitude: true, country: true, countryCode: true },
     });
     if (!city) throw BadRequest('Seçilen şehir bulunamadı.');
-    return { latitude: latitude ?? city.latitude, longitude: longitude ?? city.longitude };
+    return {
+      latitude: latitude ?? city.latitude,
+      longitude: longitude ?? city.longitude,
+      country: city.country,
+      countryCode: city.countryCode,
+    };
   }
-  return { latitude, longitude };
+
+  return {
+    latitude,
+    longitude,
+    country: data.country?.trim() || 'Türkiye',
+    countryCode: (data.countryCode ?? 'TR').toUpperCase(),
+  };
 }
 
 function buildWhere(query: ListQuery, user: Express.Request['user']): Prisma.CompanyWhereInput {
@@ -145,6 +186,9 @@ function buildWhere(query: ListQuery, user: Express.Request['user']): Prisma.Com
   if (query.status) and.push({ status: query.status });
   if (query.sector) and.push({ sector: query.sector });
   if (query.cityId) and.push({ cityId: query.cityId });
+  if (query.countryCode) and.push({ countryCode: query.countryCode });
+  if (query.scope === 'domestic') and.push({ countryCode: 'TR' });
+  if (query.scope === 'international') and.push({ countryCode: { not: 'TR' } });
   if (query.ownerId) and.push({ ownerId: query.ownerId });
   if (query.createdWithinDays) {
     and.push({ createdAt: { gte: new Date(Date.now() - query.createdWithinDays * 86_400_000) } });
@@ -213,7 +257,13 @@ router.get(
       select: {
         id: true, name: true, type: true, status: true, sector: true,
         latitude: true, longitude: true, createdAt: true,
-        city: { select: { id: true, name: true, latitude: true, longitude: true } },
+        country: true, countryCode: true, cityName: true,
+        city: {
+          select: {
+            id: true, name: true, latitude: true, longitude: true,
+            country: true, countryCode: true,
+          },
+        },
         deals: {
           where: { deletedAt: null, stage: 'Kazanıldı' },
           select: { amount: true, exchangeRate: true },
@@ -234,7 +284,10 @@ router.get(
           type: row.type,
           status: row.status,
           sector: row.sector,
-          cityName: row.city?.name ?? null,
+          // Şehir listesinden seçilmemişse serbest metin adı kullanılır.
+          cityName: row.city?.name ?? row.cityName ?? null,
+          country: row.city?.country ?? row.country,
+          countryCode: row.city?.countryCode ?? row.countryCode,
           latitude,
           longitude,
           coordinateSource: row.latitude !== null && row.longitude !== null ? 'COMPANY' : 'CITY',
@@ -360,7 +413,7 @@ router.post(
   auditAction('COMPANY_CREATE', 'Company'),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof companyBodySchema>;
-    const coords = await applyCityCoordinates(body);
+    const location = await resolveLocation(body);
 
     // Aynı isim + vergi numarası ikilisi çift kayıt göstergesidir.
     const duplicate = await prisma.company.findFirst({
@@ -389,10 +442,13 @@ router.post(
         taxNumber: body.taxNumber ?? null,
         taxOffice: body.taxOffice ?? null,
         address: body.address ?? null,
+        country: location.country,
+        countryCode: location.countryCode,
         cityId: body.cityId ?? null,
+        cityName: body.cityName ?? null,
         districtName: body.districtName ?? null,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
+        latitude: location.latitude,
+        longitude: location.longitude,
         notes: body.notes ?? null,
         ownerId: body.ownerId ?? req.user!.id,
         departmentId: body.departmentId ?? req.user!.departmentId,
@@ -428,10 +484,12 @@ router.put(
     // değiştirildiğinde eski şehrin koordinatı yapışıp kalmamalı.
     const nextCityId = body.cityId !== undefined ? body.cityId : existing.cityId;
     const cityChanged = body.cityId !== undefined && body.cityId !== existing.cityId;
-    const coords = await applyCityCoordinates({
+    const location = await resolveLocation({
       cityId: nextCityId,
       latitude: body.latitude !== undefined ? body.latitude : cityChanged ? null : existing.latitude,
       longitude: body.longitude !== undefined ? body.longitude : cityChanged ? null : existing.longitude,
+      country: body.country ?? existing.country,
+      countryCode: body.countryCode ?? existing.countryCode,
     });
 
     const company = await prisma.company.update({
@@ -448,6 +506,7 @@ router.put(
         ...(body.taxOffice !== undefined ? { taxOffice: body.taxOffice } : {}),
         ...(body.address !== undefined ? { address: body.address } : {}),
         ...(body.districtName !== undefined ? { districtName: body.districtName } : {}),
+        ...(body.cityName !== undefined ? { cityName: body.cityName } : {}),
         ...(body.notes !== undefined ? { notes: body.notes } : {}),
         ...(body.ownerId !== undefined ? { ownerId: body.ownerId } : {}),
         ...(body.departmentId !== undefined ? { departmentId: body.departmentId } : {}),
@@ -455,8 +514,10 @@ router.put(
           ? { customFields: (body.customFields ?? Prisma.DbNull) as Prisma.InputJsonValue }
           : {}),
         cityId: nextCityId,
-        latitude: coords.latitude,
-        longitude: coords.longitude,
+        country: location.country,
+        countryCode: location.countryCode,
+        latitude: location.latitude,
+        longitude: location.longitude,
       },
       include: listInclude,
     });

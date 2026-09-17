@@ -8,7 +8,9 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { IconBuilding, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/Icons';
-import type { City, Company, CompanyType, CustomFieldDefinition, Paginated } from '../types';
+import type {
+  City, Company, CompanyType, CountryOption, CustomFieldDefinition, Paginated,
+} from '../types';
 
 export const COMPANY_STAGES = [
   'Potansiyel',
@@ -43,16 +45,24 @@ interface FormState {
   taxNumber: string;
   taxOffice: string;
   address: string;
+  country: string;
+  countryCode: string;
   cityId: string | null;
+  /** Listede olmayan (çoğunlukla yurt dışı) şehirler için serbest metin. */
+  cityName: string;
   districtName: string;
+  /** Şehir seçilemeyen lokasyonlarda elle girilen koordinat. */
+  latitude: string;
+  longitude: string;
   notes: string;
   customFields: Record<string, string>;
 }
 
 const EMPTY_FORM: FormState = {
   name: '', type: 'B2B', status: 'Potansiyel', sector: '', website: '', email: '',
-  phone: '', taxNumber: '', taxOffice: '', address: '', cityId: null,
-  districtName: '', notes: '', customFields: {},
+  phone: '', taxNumber: '', taxOffice: '', address: '',
+  country: 'Türkiye', countryCode: 'TR', cityId: null, cityName: '',
+  districtName: '', latitude: '', longitude: '', notes: '', customFields: {},
 };
 
 export function Companies() {
@@ -70,7 +80,9 @@ export function Companies() {
   const [error, setError] = useState<string | null>(null);
 
   const [cities, setCities] = useState<City[]>([]);
+  const [countries, setCountries] = useState<CountryOption[]>([]);
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([]);
+  const [scopeFilter, setScopeFilter] = useState<'' | 'domestic' | 'international'>('');
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Company | null>(null);
@@ -92,6 +104,7 @@ export function Companies() {
           q: debouncedTerm || undefined,
           type: typeFilter || undefined,
           status: statusFilter || undefined,
+          scope: scopeFilter || undefined,
         },
         signal,
       );
@@ -102,7 +115,7 @@ export function Companies() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, typeFilter, statusFilter]);
+  }, [page, pageSize, debouncedTerm, typeFilter, statusFilter, scopeFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -111,16 +124,18 @@ export function Companies() {
   }, [load]);
 
   // Filtre değişince ilk sayfaya dön — aksi halde boş bir 7. sayfa görünür.
-  useEffect(() => { setPage(1); }, [debouncedTerm, typeFilter, statusFilter, pageSize]);
+  useEffect(() => { setPage(1); }, [debouncedTerm, typeFilter, statusFilter, scopeFilter, pageSize]);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [cityResponse, fieldResponse] = await Promise.all([
+        const [cityResponse, countryResponse, fieldResponse] = await Promise.all([
           api.get<{ data: City[] }>('/cities'),
+          api.get<{ data: CountryOption[] }>('/cities/countries'),
           api.get<{ data: CustomFieldDefinition[] }>('/custom-fields', { entityType: 'COMPANY' }),
         ]);
         setCities(cityResponse.data);
+        setCountries(countryResponse.data);
         setCustomFields(fieldResponse.data);
       } catch {
         // Yardımcı listeler yüklenemese de tablo çalışmaya devam eder.
@@ -128,13 +143,17 @@ export function Companies() {
     })();
   }, []);
 
+  // Şehir listesi seçili ülkeye göre süzülür; aksi halde Türkiye illeriyle
+  // yurt dışı şehirler tek listede karışırdı.
   const cityOptions = useMemo(
-    () => cities.map((city) => ({
-      value: city.id,
-      label: city.name,
-      description: `Plaka ${city.plateCode}`,
-    })),
-    [cities],
+    () => cities
+      .filter((city) => city.countryCode === form.countryCode)
+      .map((city) => ({
+        value: city.id,
+        label: city.name,
+        description: city.plateCode ? `Plaka ${city.plateCode}` : city.region ?? city.country,
+      })),
+    [cities, form.countryCode],
   );
 
   const openCreate = (): void => {
@@ -158,8 +177,17 @@ export function Companies() {
       taxNumber: company.taxNumber ?? '',
       taxOffice: company.taxOffice ?? '',
       address: company.address ?? '',
+      country: company.country ?? 'Türkiye',
+      countryCode: company.countryCode ?? 'TR',
       cityId: company.cityId,
+      cityName: company.cityName ?? '',
       districtName: company.districtName ?? '',
+      // Formda ham (elle girilmiş) koordinat gösterilir; şehirden türetilen
+      // değer düzenleme sırasında "elle girilmiş" gibi görünmemeli.
+      latitude: company.rawLatitude !== null && company.rawLatitude !== undefined
+        ? String(company.rawLatitude) : '',
+      longitude: company.rawLongitude !== null && company.rawLongitude !== undefined
+        ? String(company.rawLongitude) : '',
       notes: company.notes ?? '',
       customFields: Object.fromEntries(
         Object.entries(company.customFields ?? {}).map(([key, value]) => [key, String(value ?? '')]),
@@ -185,10 +213,16 @@ export function Companies() {
         taxNumber: form.taxNumber || null,
         taxOffice: form.taxOffice || null,
         address: form.address || null,
-        // Koordinat gönderilmez: sunucu, seçilen şehrin koordinatını
-        // otomatik yazar. Harita böylece hiçbir zaman boş kalmaz.
+        country: form.country,
+        countryCode: form.countryCode,
+        // Şehir seçilmişse koordinat ve ülke sunucuda o kayıttan türetilir.
+        // Elle koordinat girildiyse sunucu onu ezmez — şehir listesinde
+        // olmayan yurt dışı lokasyonlar böylece haritaya düşer.
         cityId: form.cityId,
+        cityName: form.cityName || null,
         districtName: form.districtName || null,
+        latitude: form.latitude ? Number(form.latitude) : null,
+        longitude: form.longitude ? Number(form.longitude) : null,
         notes: form.notes || null,
         customFields: Object.keys(form.customFields).length ? form.customFields : null,
       };
@@ -285,6 +319,18 @@ export function Companies() {
             <option value="">Tüm durumlar</option>
             {COMPANY_STAGES.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
           </select>
+
+          <select
+            className="select" style={{ width: 'auto' }}
+            value={scopeFilter}
+            onChange={(event) =>
+              setScopeFilter(event.target.value as '' | 'domestic' | 'international')}
+            aria-label="Kapsam filtresi"
+          >
+            <option value="">Yurt içi + yurt dışı</option>
+            <option value="domestic">Yalnızca yurt içi</option>
+            <option value="international">Yalnızca yurt dışı</option>
+          </select>
         </div>
 
         {loading && !result && (
@@ -314,7 +360,7 @@ export function Companies() {
                     <th>Tip</th>
                     <th>Durum</th>
                     <th>Sektör</th>
-                    <th>Şehir</th>
+                    <th>Ülke / Şehir</th>
                     <th className="text-right">Kişi</th>
                     <th className="text-right">Fırsat</th>
                     <th className="text-right">İhale</th>
@@ -337,7 +383,14 @@ export function Companies() {
                       <td><span className={typeBadgeClass(company.type)}>{company.type}</span></td>
                       <td><span className="badge badge-info">{company.status}</span></td>
                       <td className="text-sm">{company.sector ?? '—'}</td>
-                      <td className="text-sm">{company.city?.name ?? '—'}</td>
+                      <td className="text-sm">
+                        <div>{company.country ?? 'Türkiye'}</div>
+                        {(company.displayCity ?? company.city?.name ?? company.cityName) && (
+                          <div className="text-xs text-muted">
+                            {company.displayCity ?? company.city?.name ?? company.cityName}
+                          </div>
+                        )}
+                      </td>
                       <td className="text-right">{company._count?.contacts ?? 0}</td>
                       <td className="text-right">{company._count?.deals ?? 0}</td>
                       <td className="text-right">{company._count?.tenders ?? 0}</td>
@@ -452,25 +505,89 @@ export function Companies() {
           </div>
 
           <div className="field">
+            <label className="field-label" htmlFor="c-country">Ülke<span className="req">*</span></label>
+            <select
+              id="c-country" className="select" value={form.countryCode}
+              onChange={(event) => {
+                const next = countries.find((c) => c.countryCode === event.target.value);
+                // Ülke değişince şehir seçimi sıfırlanır: başka ülkenin
+                // şehri seçili kalırsa koordinat ve ülke çelişir.
+                setForm((prev) => ({
+                  ...prev,
+                  countryCode: event.target.value,
+                  country: next?.country ?? prev.country,
+                  cityId: null,
+                }));
+              }}
+            >
+              {/* Ülke kataloğu yüklenene (veya istek başarısız olana) kadar
+                  seçici boş kalmamalı: varsayılan pazar her zaman listede. */}
+              {countries.length === 0 && (
+                <option value={form.countryCode}>{form.country}</option>
+              )}
+              {countries.map((option) => (
+                <option key={option.countryCode} value={option.countryCode}>
+                  {option.country}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
             <label className="field-label" htmlFor="c-city">Şehir</label>
             <SearchableSelect
               id="c-city"
               options={cityOptions}
               value={form.cityId}
               onChange={(value) => setForm((prev) => ({ ...prev, cityId: value }))}
-              placeholder="Şehir seçiniz…"
+              placeholder={cityOptions.length ? 'Şehir seçiniz…' : 'Bu ülke için kayıtlı şehir yok'}
+              emptyText="Bu ülke için kayıtlı şehir yok — aşağıya serbest metin girin."
             />
             <div className="field-hint">
-              Şehir seçildiğinde harita koordinatı otomatik doldurulur.
+              Şehir seçildiğinde harita koordinatı ve ülke otomatik doldurulur.
             </div>
           </div>
 
           <div className="field">
-            <label className="field-label" htmlFor="c-district">İlçe</label>
+            <label className="field-label" htmlFor="c-cityname">Şehir (Serbest Metin)</label>
+            <input
+              id="c-cityname" className="input" value={form.cityName}
+              placeholder="Listede olmayan şehir / bölge"
+              onChange={(event) => setForm((prev) => ({ ...prev, cityName: event.target.value }))}
+            />
+            <div className="field-hint">
+              Listede bulunmayan lokasyonlar için. Haritada görünmesi istenirse
+              aşağıya koordinat girin.
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="c-district">İlçe / Bölge</label>
             <input
               id="c-district" className="input" value={form.districtName}
               onChange={(event) => setForm((prev) => ({ ...prev, districtName: event.target.value }))}
             />
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="c-lat">Enlem (Latitude)</label>
+            <input
+              id="c-lat" className="input" type="number" step="0.000001" min={-90} max={90}
+              value={form.latitude} placeholder="Şehirden otomatik"
+              onChange={(event) => setForm((prev) => ({ ...prev, latitude: event.target.value }))}
+            />
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="c-lng">Boylam (Longitude)</label>
+            <input
+              id="c-lng" className="input" type="number" step="0.000001" min={-180} max={180}
+              value={form.longitude} placeholder="Şehirden otomatik"
+              onChange={(event) => setForm((prev) => ({ ...prev, longitude: event.target.value }))}
+            />
+            <div className="field-hint">
+              Boş bırakılırsa seçilen şehrin koordinatı kullanılır.
+            </div>
           </div>
 
           <div className="field">

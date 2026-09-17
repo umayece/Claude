@@ -36,10 +36,20 @@ export interface CalendarFilterPreferences {
 export interface City {
   id: string;
   name: string;
-  plateCode: number;
+  /** ISO 3166-1 alpha-2 */
+  countryCode: string;
+  country: string;
+  /** Yalnızca Türkiye illerinde dolu. */
+  plateCode: number | null;
   latitude: number;
   longitude: number;
   region: string | null;
+}
+
+export interface CountryOption {
+  countryCode: string;
+  country: string;
+  cityCount: number;
 }
 
 export interface Company {
@@ -54,7 +64,13 @@ export interface Company {
   taxNumber: string | null;
   taxOffice: string | null;
   address: string | null;
+  country: string;
+  countryCode: string;
   cityId: string | null;
+  /** Şehir listesinde olmayan lokasyonlar için serbest metin. */
+  cityName: string | null;
+  /** Sunucunun çözdüğü görünen şehir adı (şehir kaydı ya da serbest metin). */
+  displayCity?: string | null;
   districtName: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -69,7 +85,10 @@ export interface Company {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  city?: { id: string; name: string; latitude: number; longitude: number } | null;
+  city?: {
+    id: string; name: string; latitude: number; longitude: number;
+    country: string; countryCode: string;
+  } | null;
   owner?: { id: string; name: string } | null;
   department?: { id: string; name: string } | null;
   revenueTry?: number;
@@ -92,6 +111,8 @@ export interface MapPoint {
   status: string;
   sector: string | null;
   cityName: string | null;
+  country: string;
+  countryCode: string;
   latitude: number;
   longitude: number;
   coordinateSource: string;

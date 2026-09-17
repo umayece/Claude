@@ -172,7 +172,11 @@ export function CompanyDetail() {
           <span className="flex items-center gap-2">
             <span className={typeBadgeClass(company.type)}>{company.type}</span>
             {company.sector && <span className="text-muted">{company.sector}</span>}
-            {company.city && <span className="text-muted">· {company.city.name}</span>}
+            <span className="text-muted">
+              · {company.country}
+              {(company.displayCity ?? company.city?.name ?? company.cityName) &&
+                `, ${company.displayCity ?? company.city?.name ?? company.cityName}`}
+            </span>
           </span>
         }
         onClose={close}
@@ -204,8 +208,12 @@ export function CompanyDetail() {
               </SpecRow>
               <SpecRow label="Telefon">{company.phone}</SpecRow>
               <SpecRow label="Vergi No">{company.taxNumber}</SpecRow>
+              <SpecRow label="Ülke">{company.country}</SpecRow>
               <SpecRow label="Şehir / İlçe">
-                {[company.city?.name, company.districtName].filter(Boolean).join(' / ') || null}
+                {[
+                  company.displayCity ?? company.city?.name ?? company.cityName,
+                  company.districtName,
+                ].filter(Boolean).join(' / ') || null}
               </SpecRow>
               <SpecRow label="Adres">{company.address}</SpecRow>
               <SpecRow label="Sorumlu">{company.owner?.name}</SpecRow>
