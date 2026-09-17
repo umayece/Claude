@@ -1,7 +1,13 @@
+# ---------------------------------------------------------------------------
+# Frontend imajı — Vite derlemesi + nginx ile statik sunum.
+#
+# NOT (kalıcı): `npm ci` KULLANILMAZ; bu depoda package-lock.json tutulmadığı
+# için lock zorunlu kılan `npm ci` derlemeyi çökertiyordu.
+# ---------------------------------------------------------------------------
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build
 

@@ -118,6 +118,7 @@ export interface MapPoint {
   coordinateSource: string;
   revenueTry: number;
   tenderCount: number;
+  dealCount: number;
   createdAt: string;
 }
 

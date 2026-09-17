@@ -25,13 +25,20 @@
   --mke-crimson: #9b1b30;
   --mke-crimson-soft: #c0304a;
 
-  /* Zemin ve yüzeyler */
-  --bg: #F8FAFC;
+  /* Zemin ve yüzeyler.
+     Çalışma alanı dümdüz beyaz değil, ferah bir buz mavisi-gri: beyaz
+     kartlar zeminden ayrışır, "düz kağıt" hissi kalkar. */
+  --bg: #F4F7F9;
   --surface: #ffffff;
   --surface-alt: #f1f5f9;
   --surface-sunken: #eef1f5;
-  --border: #e4e8ee;
+  /* Kenarlıklar artık ana ayrım aracı değil — derinliği gölge taşıyor.
+     Bu yüzden sert çizgi yerine neredeyse görünmez bir tonda. */
+  --border: #eaeef3;
   --border-strong: var(--mke-steel);
+  /* Tablo satırı hover zemini (slate-100) ve tablo başlığı zemini. */
+  --row-hover: #f1f5f9;
+  --th-bg: #f5f7fa;
 
   /* Metin */
   --text: var(--mke-anthracite);
@@ -51,15 +58,19 @@
   --purple: #6d28d9;
   --purple-bg: #ede9fe;
 
-  /* Ölçü */
-  --radius: 14px;
-  --radius-sm: 9px;
+  /* Ölçü.
+     Ana paneller belirgin şekilde yuvarlatılmış (16px ≈ rounded-2xl),
+     düğme ve küçük yüzeyler 8px (≈ rounded-lg). */
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-btn: 8px;
   --radius-pill: 999px;
 
   /* Katmanlı, yumuşak gölgeler — tek sert gölge yerine iki katman:
      yakın kontur + geniş dağılım. Kartlar zeminden "kalkık" durur. */
-  --shadow-sm: 0 1px 2px rgba(0, 40, 69, 0.04), 0 2px 8px -2px rgba(0, 40, 69, 0.06);
-  --shadow-md: 0 4px 20px -2px rgba(0, 40, 69, 0.08);
+  --shadow-sm: 0 1px 2px rgba(0, 40, 69, 0.03), 0 2px 10px -3px rgba(0, 40, 69, 0.05);
+  --shadow-md: 0 4px 24px -2px rgba(0, 40, 69, 0.05);
+  --shadow-raise: 0 8px 30px -4px rgba(0, 40, 69, 0.10);
   --shadow-lg: 0 8px 12px -4px rgba(0, 40, 69, 0.08), 0 24px 56px -8px rgba(0, 40, 69, 0.18);
   --shadow-focus: 0 0 0 3px rgba(69, 180, 170, 0.28);
 
@@ -153,19 +164,27 @@ a:hover { text-decoration: underline; }
 .sidebar-section { padding: 14px 10px 6px; font-size: 10.5px; text-transform: uppercase;
   letter-spacing: 0.8px; color: #5b7290; font-weight: 600; }
 
+/* Aktif sekme TÜM satırı boyamaz: köşeleri yuvarlatılmış turkuaz bir
+   buton gibi durur. Menünün etrafında 8px nefes payı bırakıldığı için
+   düğme kenara yapışmaz. */
 .nav-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; margin-bottom: 2px;
-  border-radius: var(--radius-sm);
+  padding: 9px 12px; margin-bottom: 3px;
+  border-radius: var(--radius-btn);
   color: #b6c7db; font-size: 13.5px; font-weight: 500;
   cursor: pointer; border: 0; background: none; width: 100%; text-align: left;
   transition: background 0.14s ease, color 0.14s ease;
 }
-.nav-item:hover { background: var(--mke-navy-soft); color: #fff; text-decoration: none; }
-.nav-item.active { background: var(--mke-navy-soft); color: #fff;
-  box-shadow: inset 3px 0 0 var(--mke-teal); }
+.nav-item:hover { background: rgba(255, 255, 255, 0.07); color: #fff; text-decoration: none; }
+.nav-item.active,
+.nav-item.active:hover {
+  background: var(--mke-teal);
+  color: var(--mke-navy);
+  font-weight: 600;
+  box-shadow: 0 2px 10px -2px rgba(69, 180, 170, 0.55);
+}
 .nav-item svg { flex-shrink: 0; opacity: 0.85; }
-.nav-item.active svg { opacity: 1; color: var(--mke-teal); }
+.nav-item.active svg { opacity: 1; color: var(--mke-navy); }
 .nav-item-badge {
   margin-left: auto; background: var(--danger); color: #fff;
   font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: var(--radius-pill);
@@ -213,20 +232,23 @@ a:hover { text-decoration: underline; }
 
 /* ---------- Kartlar ---------- */
 
+/* Ana paneller: kenarlıksız, belirgin yuvarlak köşeli, yumuşak derin gölgeli.
+   Sert 1px çizgi yerine gölge kullanmak modern SaaS arayüzlerinin ayırt
+   edici işaretidir — panel zeminden "kalkar", kutu kafesi kurmaz. */
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
 }
-.card-hover:hover { box-shadow: var(--shadow-md); }
+.card-hover:hover { box-shadow: var(--shadow-raise); transform: translateY(-2px); }
 .card-header {
-  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.card-body { padding: 16px; }
-.card-footer { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface-alt);
+.card-body { padding: 20px; }
+.card-footer { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface-alt);
   border-radius: 0 0 var(--radius) var(--radius); }
 
 .grid { display: grid; gap: 16px; }
@@ -236,10 +258,10 @@ a:hover { text-decoration: underline; }
 
 /* ---------- KPI ---------- */
 
-.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 15px 17px; box-shadow: var(--shadow-md);
+.kpi { background: var(--surface); border: 0; border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: var(--shadow-md);
   transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease); }
-.kpi:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+.kpi:hover { box-shadow: var(--shadow-raise); transform: translateY(-2px); }
 .kpi-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-muted); font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .kpi-value { font-family: var(--font-display); font-size: 32px; font-weight: 700;
@@ -250,7 +272,7 @@ a:hover { text-decoration: underline; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 7px 13px; border-radius: var(--radius-sm);
+  padding: 8px 15px; border-radius: var(--radius-btn);
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
   font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer;
   transition: background 0.14s ease, border-color 0.14s ease, transform 0.06s ease;
@@ -274,8 +296,8 @@ a:hover { text-decoration: underline; }
 .btn-danger:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
 .btn-ghost { border-color: transparent; background: transparent; }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--border); }
-.btn-sm { padding: 4px 9px; font-size: 12px; }
-.btn-icon { padding: 6px; width: 30px; height: 30px; }
+.btn-sm { padding: 5px 11px; font-size: 12px; border-radius: var(--radius-btn); }
+.btn-icon { padding: 6px; width: 32px; height: 32px; border-radius: var(--radius-btn); }
 
 /* ---------- Formlar ---------- */
 
@@ -308,19 +330,22 @@ a:hover { text-decoration: underline; }
 
 .table-wrap { overflow-x: auto; border-radius: var(--radius); }
 .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+/* Başlık satırı: yumuşak gri zemin, Barlow Condensed, büyük harf.
+   Tablo gövdesi ferah — satır yüksekliği 16px dikey boşlukla nefes alır. */
 .table th {
-  text-align: left; padding: 12px 14px;
+  text-align: left; padding: 13px 16px;
   font-family: var(--font-display);
   font-size: 12.5px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.8px; color: var(--mke-navy);
-  background: var(--surface-sunken); border-bottom: 1px solid var(--border);
+  text-transform: uppercase; letter-spacing: 0.9px; color: var(--text-muted);
+  background: var(--th-bg); border-bottom: 1px solid var(--border);
   white-space: nowrap; position: sticky; top: 0; z-index: 1;
 }
-.table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.table td { padding: 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
-.table tbody tr { transition: background 0.1s ease; }
-.table tbody tr:hover { background: var(--mke-teal-soft);
-  box-shadow: inset 3px 0 0 var(--mke-teal); }
+.table tbody tr { transition: background 0.16s var(--ease); }
+/* Belirgin ama pürüzsüz: renk değişir, satır yerinden oynamaz, kenarda
+   sert bir çubuk belirmez. */
+.table tbody tr:hover { background: var(--row-hover); }
 .table tbody tr.clickable { cursor: pointer; }
 .table .col-actions { text-align: right; white-space: nowrap; }
 .row-actions { display: inline-flex; gap: 4px; opacity: 0.55; transition: opacity 0.14s ease; }
@@ -909,15 +934,7 @@ tr:hover .row-actions { opacity: 1; }
   border: 3px solid rgba(255, 255, 255, 0.92);
   box-shadow: 0 2px 10px rgba(16, 24, 40, 0.34);
 }
-.cluster-list { max-height: 260px; overflow-y: auto; margin: -4px -6px 0; }
-.cluster-item {
-  padding: 7px 8px; border-radius: 6px; cursor: pointer;
-  border-bottom: 1px solid var(--border);
-}
-.cluster-item:last-child { border-bottom: 0; }
-.cluster-item:hover { background: var(--surface-alt); }
-.cluster-item-name { font-weight: 600; font-size: 12.5px; }
-.cluster-item-meta { font-size: 11px; color: var(--text-muted); }
+/* .cluster-* kuralları dosyanın sonundaki harita bölümünde tanımlıdır. */
 
 /* ==========================================================================
    Onay iletişim kutusu
@@ -1241,3 +1258,114 @@ tr:hover .row-actions { opacity: 1; }
 .map-filter-btn.active { background: var(--mke-navy); }
 .view-toggle button.active { color: var(--mke-navy); }
 .side-guest { background: var(--mke-teal-soft); color: var(--mke-teal-dark); }
+
+/* ==========================================================================
+   Modern SaaS yüzeyleri — kenarlık yerine derinlik
+   --------------------------------------------------------------------------
+   Kural: ana paneller (kart, tablo kabı, modal, takvim, çekmece, harita
+   kutuları) sert 1px çizgi taşımaz. Ayrım yumuşak gölge ve yüzey rengi
+   farkıyla kurulur. Kenarlık yalnızca satır ayıracı, form alanı ve
+   gerçekten çizgi gereken yerlerde kalır.
+   ========================================================================== */
+
+.table-wrap {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  overflow-x: auto;
+}
+/* Kart içindeki tablo ikinci bir gölge katmanı oluşturmasın. */
+.card .table-wrap,
+.modal .table-wrap,
+.drawer .table-wrap { box-shadow: none; border-radius: 0; }
+
+.modal { border-radius: var(--radius); }
+.modal-header { padding: 17px 20px; }
+.modal-body { padding: 20px; }
+
+.calendar {
+  border: 0;
+  box-shadow: var(--shadow-md);
+}
+
+.map-shell {
+  border: 0;
+  box-shadow: var(--shadow-md);
+}
+.map-filter,
+.map-legend {
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-raise);
+}
+.map-filter { padding: 12px; }
+.map-filter-btn { border-radius: var(--radius-btn); }
+
+.kanban-column {
+  border: 0;
+  background: #eef2f6;
+  box-shadow: inset 0 0 0 1px rgba(0, 40, 69, 0.04);
+}
+
+.doc-card,
+.calc-tile,
+.participant-row,
+.checklist-item,
+.agenda-item {
+  border: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Form alanları kenarlığını korur — yazılabilir alanın sınırı görünmeli. */
+.input, .select, .textarea { border-radius: var(--radius-btn); }
+
+/* ==========================================================================
+   Harita küme listesi (popup)
+   Bir koordinattaki tüm kurumlar; 260px'de kesilip kendi içinde kayar.
+   ========================================================================== */
+
+.leaflet-popup-content-wrapper { border-radius: var(--radius-sm) !important; }
+
+.cluster-list {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 8px -6px 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+/* İnce, dikkat dağıtmayan kaydırma çubuğu. */
+.cluster-list::-webkit-scrollbar { width: 6px; }
+.cluster-list::-webkit-scrollbar-thumb {
+  background: var(--mke-steel); border-radius: 3px;
+}
+
+.cluster-item {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 100%; text-align: left;
+  padding: 8px 9px; margin-bottom: 2px;
+  border: 0; background: none; font-family: inherit;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  transition: background 0.14s var(--ease);
+}
+.cluster-item:hover { background: var(--row-hover); }
+.cluster-item:focus-visible { outline: 2px solid var(--mke-teal); outline-offset: -2px; }
+
+.cluster-item-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.cluster-item-name {
+  font-weight: 600; font-size: 12.5px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cluster-item-type {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px;
+  padding: 1px 6px; border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+}
+.cluster-item-meta { font-size: 11px; color: var(--text-muted); }
+
+.cluster-marker { cursor: pointer; }

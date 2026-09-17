@@ -41,8 +41,14 @@ services:
       # ve hiçbir müşteri verisi dışarı çıkmaz.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-claude-opus-5}
+    # prisma/migrations klasörü varsa migration geçmişi uygulanır; yoksa
+    # şema doğrudan veritabanına yazılır. `migrate deploy` boş bir geçmişte
+    # hiçbir tablo oluşturmadan başarıyla çıkıyor, backend de ilk sorguda
+    # "relation does not exist" ile ölüyordu. `db push` zaten senkron bir
+    # veritabanında işlemsizdir, tekrar tekrar çalıştırmak güvenlidir.
     command: >
-      sh -c "npx prisma migrate deploy && node dist/index.js"
+      sh -c "if [ -d prisma/migrations ]; then npx prisma migrate deploy;
+      else npx prisma db push --skip-generate; fi && node dist/index.js"
     ports:
       - "4000:4000"
 

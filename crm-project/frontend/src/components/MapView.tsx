@@ -81,13 +81,18 @@ export function MapView() {
       maxBoundsViscosity: 1,
     });
 
-    // Anahtarsız standart OpenStreetMap karo sunucusu.
-    // (Carto/Mapbox gibi sağlayıcılar artık anahtar istediği için
-    // haritaya "API KEY REQUIRED" filigranı basıyordu.)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Anahtarsız, ücretsiz, resmî OpenStreetMap karo sunucusu.
+    //
+    // Anahtar isteyen ticari karo sağlayıcıları, anahtarsız isteklerde
+    // karoların üzerine "API KEY REQUIRED" filigranı basar. Bu projede
+    // böyle bir sağlayıcı KULLANILMAZ; aşağıdaki URL değiştirilmemelidir.
+    //
+    // `{s}` alt alan adı biçimi (a/b/c.tile...) OSM tarafından artık
+    // önerilmiyor — HTTP/2 üzerinden tek konak daha hızlı. Bu yüzden
+    // `subdomains` seçeneği de kaldırıldı.
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      subdomains: 'abc',
       maxZoom: 19,
       // Döşemeler tekrarlanmaz; harita tek bir dünya gösterir.
       noWrap: true,
@@ -194,9 +199,11 @@ export function MapView() {
     // --- Kümeleme ---
     // Aynı koordinata birden fazla şirket düştüğünde (ör. hepsi Ankara'da)
     // üstteki pin diğerlerini tamamen örtüyordu ve yalnızca biri
-    // tıklanabiliyordu. Noktalar koordinat anahtarına göre gruplanır;
-    // grup birden fazlaysa sayaçlı bir küme işareti çizilir ve popup'ta
-    // gruptaki TÜM şirketler liste olarak sunulur.
+    // tıklanabiliyordu.
+    //
+    // Kural: HER BENZERSİZ KOORDİNAT İÇİN TEK MARKER. Marker'a tıklanınca
+    // açılan popup, o koordinattaki TÜM kurumları kaydırılabilir bir liste
+    // hâlinde gösterir; hiçbir kayıt bir diğerinin altında kalmaz.
     //
     // Harici bir kümeleme eklentisi yerine bu yaklaşım seçildi: şehir
     // merkezine düşen kayıtların koordinatı BİREBİR aynıdır, dolayısıyla
@@ -212,13 +219,23 @@ export function MapView() {
 
     const openCompany = (id: string): void => navigate(`/companies/${id}`);
 
-    /** Tek şirket için popup gövdesi. */
-    const singlePopup = (point: MapPoint): HTMLElement => {
+    /**
+     * Bir koordinattaki TÜM kurumları kaydırılabilir liste hâlinde gösterir.
+     *
+     * Tek kurumlu koordinatlarda da aynı biçim kullanılır: kullanıcının
+     * gördüğü kutu her tıklamada aynı yapıda olur, tek/çoklu ayrımı
+     * öğrenmek zorunda kalmaz. Liste `.cluster-list` ile 260px'de kesilir
+     * ve kendi içinde kayar — 40 kurumlu Ankara pini ekranı taşırmaz.
+     */
+    const groupPopup = (rows: MapPoint[]): HTMLElement => {
       const wrapper = document.createElement('div');
+      const place = rows[0]?.cityName ?? rows[0]?.country ?? 'Bu konum';
 
       const title = document.createElement('div');
       title.className = 'map-popup-title';
-      title.textContent = point.name;
+      title.textContent = rows.length === 1
+        ? place
+        : `${place} — ${rows.length} kurum`;
       wrapper.appendChild(title);
 
       const addRow = (key: string, value: string): void => {
@@ -232,70 +249,45 @@ export function MapView() {
         wrapper.appendChild(row);
       };
 
-      addRow('Tip', point.type);
-      addRow('Durum', point.status);
-      addRow('Ülke', point.country);
-      if (point.cityName) addRow('Şehir', point.cityName);
-      addRow('Satış Cirosu', formatTry(point.revenueTry));
-      if (point.tenderCount > 0) addRow('Aktif İhale', String(point.tenderCount));
-      if (point.coordinateSource === 'CITY') addRow('Konum', 'Şehir merkezi (yaklaşık)');
-
-      const link = document.createElement('a');
-      link.className = 'map-popup-link';
-      link.href = `/companies/${point.id}`;
-      link.textContent = 'Detaya Git →';
-      link.addEventListener('click', (event) => {
-        // SPA içinde kal: tam sayfa yenilemesi yapma.
-        event.preventDefault();
-        openCompany(point.id);
-      });
-      wrapper.appendChild(link);
-
-      return wrapper;
-    };
-
-    /** Küme için popup gövdesi: gruptaki her şirket ayrı satır. */
-    const clusterPopup = (points: MapPoint[]): HTMLElement => {
-      const wrapper = document.createElement('div');
-
-      const title = document.createElement('div');
-      title.className = 'map-popup-title';
-      title.textContent = `${points[0]?.cityName ?? 'Bu konum'} — ${points.length} kurum`;
-      wrapper.appendChild(title);
-
-      const totalRow = document.createElement('div');
-      totalRow.className = 'map-popup-row';
-      const totalKey = document.createElement('span');
-      totalKey.textContent = 'Toplam ciro';
-      const totalValue = document.createElement('strong');
-      totalValue.textContent = formatTry(points.reduce((sum, p) => sum + p.revenueTry, 0));
-      totalRow.append(totalKey, totalValue);
-      wrapper.appendChild(totalRow);
+      addRow('Toplam ciro', formatTry(rows.reduce((sum, p) => sum + p.revenueTry, 0)));
+      addRow('Fırsat', String(rows.reduce((sum, p) => sum + p.dealCount, 0)));
+      const tenderTotal = rows.reduce((sum, p) => sum + p.tenderCount, 0);
+      if (tenderTotal > 0) addRow('Aktif ihale', String(tenderTotal));
+      if (rows.every((p) => p.coordinateSource === 'CITY')) {
+        addRow('Konum', 'Şehir merkezi (yaklaşık)');
+      }
 
       const list = document.createElement('div');
       list.className = 'cluster-list';
 
-      for (const point of [...points].sort((a, b) => b.revenueTry - a.revenueTry)) {
-        const item = document.createElement('div');
+      // Ciroya göre azalan: en değerli müşteri listenin başında.
+      for (const point of [...rows].sort((a, b) => b.revenueTry - a.revenueTry)) {
+        const item = document.createElement('button');
+        item.type = 'button';
         item.className = 'cluster-item';
-        item.setAttribute('role', 'button');
-        item.tabIndex = 0;
 
-        const name = document.createElement('div');
+        const name = document.createElement('span');
         name.className = 'cluster-item-name';
         name.textContent = point.name;
 
-        const meta = document.createElement('div');
+        const badge = document.createElement('span');
+        badge.className = 'cluster-item-type';
+        badge.textContent = point.type;
+        badge.style.color = pinColor(point.type);
+        badge.style.borderColor = pinColor(point.type);
+
+        const head = document.createElement('span');
+        head.className = 'cluster-item-head';
+        head.append(name, badge);
+
+        const meta = document.createElement('span');
         meta.className = 'cluster-item-meta';
         meta.textContent =
-          `${point.type} · ${point.status} · ${formatTry(point.revenueTry)}` +
+          `${point.dealCount} fırsat · ${formatTry(point.revenueTry)}` +
           (point.tenderCount > 0 ? ` · ${point.tenderCount} ihale` : '');
 
-        item.append(name, meta);
+        item.append(head, meta);
         item.addEventListener('click', () => openCompany(point.id));
-        item.addEventListener('keydown', (event) => {
-          if ((event as KeyboardEvent).key === 'Enter') openCompany(point.id);
-        });
         list.appendChild(item);
       }
 
@@ -303,31 +295,15 @@ export function MapView() {
       return wrapper;
     };
 
-    for (const points of groups.values()) {
-      const first = points[0];
+    for (const rows of groups.values()) {
+      const first = rows[0];
       if (!first) continue;
 
-      if (points.length === 1) {
-        const marker = L.circleMarker([first.latitude, first.longitude], {
-          radius: 6,
-          color: '#ffffff',
-          weight: 2,
-          fillColor: pinColor(first.type),
-          fillOpacity: 0.95,
-        });
-        marker.bindPopup(singlePopup(first), { minWidth: 210 });
-        marker.bindTooltip(`${first.name} · ${first.country}`, {
-          direction: 'top', offset: [0, -8],
-        });
-        marker.addTo(markers);
-        continue;
-      }
-
       // Küme boyutu adet sayısıyla büyür ama üst sınırı vardır.
-      const size = Math.min(46, 26 + points.length * 2);
+      const size = rows.length === 1 ? 22 : Math.min(46, 26 + rows.length * 2);
       // Baskın tip kümenin rengini belirler.
       const typeCounts = new Map<string, number>();
-      for (const p of points) typeCounts.set(p.type, (typeCounts.get(p.type) ?? 0) + 1);
+      for (const p of rows) typeCounts.set(p.type, (typeCounts.get(p.type) ?? 0) + 1);
       const dominant = [...typeCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'OTHER';
 
       const icon = L.divIcon({
@@ -335,15 +311,17 @@ export function MapView() {
         html:
           `<div class="cluster-marker" style="width:${size}px;height:${size}px;` +
           `background:${pinColor(dominant)};font-size:${size > 36 ? 14 : 12}px">` +
-          `${points.length}</div>`,
+          `${rows.length > 1 ? rows.length : ''}</div>`,
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
       });
 
       const marker = L.marker([first.latitude, first.longitude], { icon });
-      marker.bindPopup(clusterPopup(points), { minWidth: 260, maxWidth: 320 });
+      marker.bindPopup(groupPopup(rows), { minWidth: 268, maxWidth: 330 });
       marker.bindTooltip(
-        `${points.length} kurum — ${first.cityName ?? first.country}`,
+        rows.length === 1
+          ? `${first.name} · ${first.country}`
+          : `${rows.length} kurum — ${first.cityName ?? first.country}`,
         { direction: 'top', offset: [0, -size / 2] },
       );
       marker.addTo(markers);

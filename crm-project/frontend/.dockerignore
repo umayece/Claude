@@ -1,0 +1,6 @@
+# `COPY . .` adımında host'taki node_modules imaja taşınırsa esbuild/vite
+# ikilileri konak mimarisiyle uyuşmaz ve `npm run build` çöker.
+node_modules
+dist
+.env
+.env.*

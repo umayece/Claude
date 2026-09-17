@@ -239,9 +239,32 @@ MKE yurt dışı pazarlarda da çalıştığı için konum modeli Türkiye'ye ba
   kadraja alır (kayıtlar yalnızca yurt dışındaysa boş Türkiye haritası
   görünmez). "Türkiye'ye Dön" ve "Verilere Sığdır" düğmeleri mevcuttur.
 
-Harita karoları **anahtarsız** OpenStreetMap sunucusundan gelir
-(`tile.openstreetmap.org`). Anahtar isteyen bir sağlayıcıya geçilirse
-karoların üzerine filigran basılır.
+#### Harita karoları
+
+Karolar **anahtarsız, ücretsiz** resmî OpenStreetMap sunucusundan gelir:
+
+```
+https://tile.openstreetmap.org/{z}/{x}/{y}.png
+```
+
+Bu URL **değiştirilmemelidir**. Carto, Mapbox, Stadia gibi sağlayıcılar
+anahtar ister ve anahtarsız isteklerde karoların üzerine
+"API KEY REQUIRED" filigranı basar. Depoda hiçbir Carto referansı yoktur.
+`{s}` alt alan adı biçimi de kullanılmaz — OSM artık HTTP/2 üzerinden tek
+konağı öneriyor.
+
+#### Marker kümeleme
+
+Her **benzersiz koordinat için tek bir marker** çizilir. Şehir merkezine
+düşen kayıtların koordinatı birebir aynı olduğundan gruplama yakınlığa göre
+değil, koordinat anahtarına göre yapılır; sonuç zoom seviyesinden bağımsız
+olarak kararlıdır ve harici bir kümeleme eklentisi gerekmez.
+
+Marker'a tıklanınca açılan popup o koordinattaki **tüm kurumları**
+kaydırılabilir bir liste hâlinde gösterir: şirket adı, tipi (renkli rozet)
+ve fırsat sayısı. Liste 260px'de kesilip kendi içinde kayar, bir satıra
+tıklamak kurum detayına gider. Böylece hiçbir kayıt bir diğerinin altında
+kalmaz.
 
 ### Kur mimarisi — anlık değerleme
 
@@ -318,10 +341,24 @@ sidebar alt köşesi (%6) ve boş durum ekranları (%4). Boş durumlarda motif
 pseudo-element'inde **data-URI SVG** olarak gömülüdür — ek ağ isteği yok,
 DOM'a düğüm eklenmez, ekran okuyucu okumaz.
 
-**Yüzeyler.** Kartlar `rounded-xl` ve
-`box-shadow: 0 4px 20px -2px rgba(0, 40, 69, 0.08)`; tablo satırlarında yumuşak
-turkuaz hover; durum etiketleri tek tip hap (pill) rozet — yarı saydam zemin +
-doygun metin rengi.
+**Rozetler.** Durum etiketleri tek tip hap (pill) biçimindedir —
+yarı saydam zemin + doygun metin rengi.
+
+**Yüzey dili.** Ana paneller (kart, tablo kabı, modal, takvim, harita
+kutuları) sert 1px kenarlık taşımaz; ayrım yumuşak gölge ve yüzey rengi
+farkıyla kurulur. Çalışma alanı zemini `#F4F7F9`, paneller beyaz ve 16px
+yuvarlak köşeli, gölge `0 4px 24px -2px rgba(0, 40, 69, 0.05)`. Düğmeler
+8px yuvarlak. Tablo satırları 16px dikey boşlukla ferahtır; başlık satırı
+yumuşak gri zeminde Barlow Condensed büyük harf, satır üzerine gelince
+zemin `#F1F5F9`'a döner — renk değişir, satır yerinden oynamaz.
+
+**Sidebar.** Tam `#002845`. Aktif sekme tüm satırı boyamaz: köşeleri
+yuvarlatılmış turkuaz (`#45B4AA`) bir düğme gibi durur, metni lacivert olur.
+
+Proje Tailwind kullanmaz; yukarıdaki değerler `styles.css` içinde CSS
+değişkenleri olarak tanımlıdır (`--bg`, `--radius`, `--radius-btn`,
+`--shadow-md`, `--row-hover`, `--th-bg`). Tek noktadan değiştirilirler.
+
 
 ---
 
@@ -334,3 +371,44 @@ doygun metin rengi.
 - **WhatsApp mesajı CRM'den gönderilmez.** Resmî Business API ayrı bir
   kurumsal onay sürecidir; modal `wa.me` bağlantısı üretir.
 - **Sözleşme PDF'i** tarayıcının yazdırma motoruyla üretilir (ek bağımlılık yok).
+
+
+---
+
+## Docker ile ayağa kaldırma
+
+```bash
+cp .env.example .env     # JWT_ACCESS_SECRET ve JWT_REFRESH_SECRET doldurun
+docker compose up --build
+```
+
+Arayüz `http://localhost:8080`, API `http://localhost:4000`.
+
+Örnek veriyi yüklemek için (harita boş görünmesin):
+
+```bash
+docker compose exec backend npx tsx prisma/seed.ts
+```
+
+### Derleme kararlılığı için kalıcı kurallar
+
+Bu ayarlar bilinçli tercihtir; geri alınırsa derleme çöker.
+
+- **`npm ci` kullanılmaz, `npm install` kullanılır.** Depoda
+  `package-lock.json` tutulmuyor; `npm ci` lock dosyası olmadan çalışmayı
+  reddeder ve imaj derlemesini durdurur.
+- **`backend/Dockerfile` her iki aşamada `apk add --no-cache openssl`
+  çalıştırır.** Prisma query engine OpenSSL'e bağlıdır; Alpine imajında
+  kurulu gelmediği için `npx prisma generate` adımı hata verip derlemeyi
+  durduruyordu.
+- **Backend derlemesi tip hatasında durmaz:**
+  `npx tsc -p tsconfig.json --noEmitOnError false || true`. JS çıktısı yine
+  üretilir ve konteyner ayağa kalkar. Tip denetimi ayrı bir adımdır:
+  `npm run typecheck`.
+- **`frontend/.dockerignore` vardır.** `COPY . .` adımında host'taki
+  `node_modules` imaja taşınırsa esbuild/Vite ikilileri konak mimarisiyle
+  uyuşmaz ve `npm run build` çöker.
+- **Compose komutu migration geçmişi yoksa `prisma db push` yapar.**
+  `prisma migrate deploy` boş bir `prisma/migrations` klasöründe hiçbir tablo
+  oluşturmadan başarıyla çıkıyor, backend de ilk sorguda
+  "relation does not exist" ile ölüyordu.

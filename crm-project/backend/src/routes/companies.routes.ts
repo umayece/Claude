@@ -268,7 +268,15 @@ router.get(
           where: { deletedAt: null, stage: 'Kazanıldı' },
           select: { amount: true, currency: true },
         },
-        _count: { select: { tenders: { where: { deletedAt: null } } } },
+        // Harita popup'ında kurum başına fırsat adedi gösterilir; ciro
+        // yalnızca kazanılmış fırsatlardan hesaplanırken bu sayaç TÜM
+        // açık/kapalı fırsatları kapsar.
+        _count: {
+          select: {
+            tenders: { where: { deletedAt: null } },
+            deals: { where: { deletedAt: null } },
+          },
+        },
       },
     });
 
@@ -297,6 +305,7 @@ router.get(
           coordinateSource: row.latitude !== null && row.longitude !== null ? 'COMPANY' : 'CITY',
           revenueTry,
           tenderCount: row._count.tenders,
+          dealCount: row._count.deals,
           createdAt: row.createdAt,
         };
       })
