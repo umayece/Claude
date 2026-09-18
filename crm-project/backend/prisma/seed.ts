@@ -802,8 +802,203 @@ async function main(): Promise<void> {
   await seedDeals(companyIndex);
   await seedTenders(companyIndex);
   await seedProtocolVisits(companyIndex, userIndex);
+  await seedStandaloneContacts();
+  await seedActivities(userIndex);
 
   console.log('\n✅ Tamamlandı.');
+}
+
+/**
+ * Şirketsiz (bağımsız) kişiler.
+ *
+ * Askeri ataşe, bağımsız danışman ve aracılar hiçbir kuruma bağlı
+ * değildir; `companyId` null olarak kaydedilir ve kendi adres/konum
+ * bilgilerini taşırlar.
+ */
+async function seedStandaloneContacts(): Promise<void> {
+  const people = [
+    {
+      firstName: 'Ahmed', lastName: 'Al-Mansouri', title: 'Savunma Ataşesi, Albay',
+      contactType: 'Askeri Ataşe', country: 'Birleşik Arap Emirlikleri', countryCode: 'AE',
+      cityName: 'Abu Dabi', latitude: 24.4539, longitude: 54.3773,
+      addressLine: 'BAE Büyükelçiliği, Savunma Ataşeliği, Ankara',
+      phone: '+971 50 442 1180', normalized: '971504421180',
+    },
+    {
+      firstName: 'Mehmet', lastName: 'Karaduman', title: 'Bağımsız Savunma Danışmanı',
+      contactType: 'Bağımsız Danışman', country: 'Türkiye', countryCode: 'TR',
+      cityName: 'Ankara', latitude: 39.9334, longitude: 32.8597,
+      addressLine: 'Çankaya, Ankara',
+      phone: '0532 118 44 20', normalized: '905321184420',
+    },
+    {
+      firstName: 'Jean-Pierre', lastName: 'Rousseau', title: 'Ticari Aracı',
+      contactType: 'Aracı/Komisyoncu', country: 'Fransa', countryCode: 'FR',
+      cityName: 'Paris', latitude: 48.8566, longitude: 2.3522,
+      addressLine: '12 Rue de la Paix, Paris',
+      phone: '+33 6 12 45 78 90', normalized: '33612457890',
+    },
+    {
+      firstName: 'Nurlan', lastName: 'Aliyev', title: 'Savunma Ataşesi, Yarbay',
+      contactType: 'Askeri Ataşe', country: 'Azerbaycan', countryCode: 'AZ',
+      cityName: 'Bakü', latitude: 40.4093, longitude: 49.8671,
+      addressLine: 'Azerbaycan Büyükelçiliği, Ankara',
+      phone: '+994 50 221 30 44', normalized: '994502213044',
+    },
+  ];
+
+  let created = 0;
+  for (const person of people) {
+    const exists = await prisma.contact.findFirst({
+      where: { firstName: person.firstName, lastName: person.lastName, companyId: null },
+      select: { id: true },
+    });
+    if (exists) continue;
+
+    await prisma.contact.create({
+      data: {
+        companyId: null,
+        contactType: person.contactType,
+        firstName: person.firstName,
+        lastName: person.lastName,
+        title: person.title,
+        email: `${person.firstName.toLowerCase().replace(/[^a-z]/g, '')}@example.com`,
+        addressLine: person.addressLine,
+        cityName: person.cityName,
+        country: person.country,
+        countryCode: person.countryCode,
+        latitude: person.latitude,
+        longitude: person.longitude,
+        phones: {
+          create: [{
+            number: person.phone,
+            normalizedNumber: person.normalized,
+            label: 'Cep',
+            isPrimary: true,
+          }],
+        },
+      },
+    });
+    created += 1;
+  }
+  console.log(`  • ${created} bağımsız kişi (ataşe/danışman/aracı)`);
+}
+
+/** Fuar ve etkinlik kayıtları. */
+async function seedActivities(userIndex: Map<string, string>): Promise<void> {
+  const ownerId = [...userIndex.values()][0] ?? null;
+
+  const events = [
+    {
+      code: 'AKT-2026-0001', title: 'IDEF 2026 Uluslararası Savunma Sanayii Fuarı',
+      type: 'FUAR', status: 'Tamamlandı',
+      start: '2026-07-21', end: '2026-07-24',
+      location: 'İstanbul Fuar Merkezi', venue: 'Hall 3 · Stand B-114',
+      country: 'Türkiye', countryCode: 'TR',
+      objective: 'Körfez ve Orta Asya heyetleriyle 155mm ve küçük çaplı mühimmat görüşmeleri.',
+      outcomeNote: null, leads: 84, budget: 180_000,
+    },
+    {
+      code: 'AKT-2026-0002', title: 'DSEI 2027 Londra',
+      type: 'FUAR', status: 'Planlandı',
+      start: '2027-09-14', end: '2027-09-17',
+      location: 'ExCeL London', venue: 'Türkiye Pavyonu',
+      country: 'Birleşik Krallık', countryCode: 'GB',
+      objective: 'NATO tedarik zincirine giriş; Avrupa distribütör ağı görüşmeleri.',
+      outcomeNote: null, leads: 0, budget: 320_000,
+    },
+    {
+      code: 'AKT-2026-0003', title: 'Saha Expo 2026',
+      type: 'FUAR', status: 'Tamamlandı',
+      start: '2026-05-12', end: '2026-05-15',
+      location: 'İstanbul', venue: 'Hall 9 · Stand A-22',
+      country: 'Türkiye', countryCode: 'TR',
+      objective: 'Yerli alt yüklenici ağının genişletilmesi.',
+      outcomeNote: 'Toplam 47 görüşme yapıldı. 3 alt yüklenici ile numune süreci başlatıldı. '
+        + 'Katar heyeti 7.62 mm için fiyat listesi talep etti; teklif hazırlanacak.',
+      leads: 47, budget: 95_000,
+    },
+    {
+      code: 'AKT-2026-0004', title: 'Gazi Fişek Fabrikası Teknik Gezi',
+      type: 'FABRIKA_GEZISI', status: 'Planlandı',
+      start: '2026-10-08', end: null,
+      location: 'Ankara', venue: 'Gazi Fişek Fabrikası',
+      country: 'Türkiye', countryCode: 'TR',
+      objective: 'Kazak heyetine üretim hattı ve kalite kontrol süreçlerinin gösterimi.',
+      outcomeNote: null, leads: 0, budget: null,
+    },
+  ];
+
+  let created = 0;
+  for (const event of events) {
+    const exists = await prisma.businessActivity.findUnique({
+      where: { activityCode: event.code }, select: { id: true },
+    });
+    if (exists) continue;
+
+    const activity = await prisma.businessActivity.create({
+      data: {
+        activityCode: event.code,
+        title: event.title,
+        type: event.type,
+        status: event.status,
+        startDate: new Date(event.start),
+        endDate: event.end ? new Date(event.end) : null,
+        location: event.location,
+        venue: event.venue,
+        country: event.country,
+        countryCode: event.countryCode,
+        objective: event.objective,
+        outcomeNote: event.outcomeNote,
+        outcomeReportAt: event.outcomeNote ? new Date(event.start) : null,
+        leadCount: event.leads,
+        budgetAmount: event.budget,
+        budgetCurrency: 'USD',
+        ownerId,
+      },
+    });
+
+    // Ekip: bir kişi katılmıyor olarak işaretli — üstü çizili gösterim test edilebilsin.
+    await prisma.activityParticipant.createMany({
+      data: [
+        { activityId: activity.id, fullName: 'Serkan Yıldırım', role: 'Pazarlama Müdürü', sortOrder: 0 },
+        { activityId: activity.id, fullName: 'Elif Demir', role: 'Dış Ticaret Uzmanı', sortOrder: 1 },
+        {
+          activityId: activity.id, fullName: 'Hakan Aslan', role: 'Teknik Danışman',
+          isAttending: false, absenceReason: 'Görev çakışması', sortOrder: 2,
+        },
+      ],
+    });
+
+    created += 1;
+  }
+
+  // Bağımsız ataşeleri IDEF kaydına bağla: fuarda görüşülen heyetler.
+  const idef = await prisma.businessActivity.findUnique({
+    where: { activityCode: 'AKT-2026-0001' }, select: { id: true },
+  });
+  if (idef) {
+    const atases = await prisma.contact.findMany({
+      where: { companyId: null, contactType: 'Askeri Ataşe' },
+      select: { id: true },
+    });
+    for (const [index, contact] of atases.entries()) {
+      await prisma.activityContact.upsert({
+        where: { activityId_contactId: { activityId: idef.id, contactId: contact.id } },
+        create: {
+          activityId: idef.id,
+          contactId: contact.id,
+          interest: index === 0 ? 'Sıcak' : 'Ilık',
+          note: index === 0
+            ? '155 mm obüs mühimmatı için numune ve fiyat listesi talep etti.'
+            : 'Küçük çaplı mühimmat ile ilgilendi; teknik şartname gönderilecek.',
+        },
+        update: {},
+      });
+    }
+  }
+
+  console.log(`  • ${created} aktivite/fuar kaydı`);
 }
 
 main()

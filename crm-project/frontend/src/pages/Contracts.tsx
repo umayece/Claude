@@ -12,15 +12,18 @@ import { SplitDrawer, SpecRow } from '../components/SplitDrawer';
 import { printCorporateDocument } from '../utils/corporatePrint';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
 import {
-  IconCredit, IconDownload, IconEdit, IconFile, IconPlus, IconSearch, IconTrash,
+  IconAlert, IconBox, IconClock, IconCredit, IconDownload, IconEdit, IconFile,
+  IconPlus, IconSearch, IconTrash,
 } from '../components/Icons';
 import type {
-  Company, Contract, CurrencyCode, Paginated, PaymentMilestone,
+  Company, Contract, CurrencyCode, DeliveryInfo, DeliveryUrgency,
+  Paginated, PaymentMilestone,
 } from '../types';
 
 const CONTRACT_STATUSES = ['Taslak', 'Aktif', 'Askıda', 'Tamamlandı', 'Feshedildi'] as const;
 const MILESTONE_STATUSES = ['Bekliyor', 'Faturalandı', 'Tahsil Edildi', 'Gecikti'] as const;
-const CURRENCIES: CurrencyCode[] = ['TRY', 'USD', 'EUR', 'GBP'];
+// USD ilk sırada: savunma sanayii satışları ağırlıklı dövizlidir.
+const CURRENCIES: CurrencyCode[] = ['USD', 'TRY', 'EUR', 'GBP'];
 
 interface FormState {
   title: string;
@@ -33,11 +36,20 @@ interface FormState {
   endDate: string;
   renewalDate: string;
   description: string;
+  // --- Termin ve gerçekleşen maliyet ---
+  deliveryDate: string;
+  deliveryNote: string;
+  deliveredAt: string;
+  cogs: string;
+  cogsCurrency: CurrencyCode;
+  cogsNote: string;
 }
 
 const EMPTY: FormState = {
   title: '', companyId: null, contractNumber: '', status: 'Aktif', amount: '0',
-  currency: 'TRY', startDate: '', endDate: '', renewalDate: '', description: '',
+  currency: 'USD', startDate: '', endDate: '', renewalDate: '', description: '',
+  deliveryDate: '', deliveryNote: '', deliveredAt: '',
+  cogs: '', cogsCurrency: 'USD', cogsNote: '',
 };
 
 interface MilestoneForm {
@@ -50,10 +62,30 @@ interface MilestoneForm {
 }
 
 const EMPTY_MILESTONE: MilestoneForm = {
-  title: '', amount: '0', currency: 'TRY',
+  title: '', amount: '0', currency: 'USD',
   dueDate: new Date().toISOString().slice(0, 10),
   status: 'Bekliyor', invoiceNumber: '',
 };
+
+/** Termin rozetinin rengi: aciliyet arttıkça kırmızıya yaklaşır. */
+function deliveryBadgeClass(urgency: DeliveryUrgency): string {
+  switch (urgency) {
+    case 'GECIKTI': return 'badge-danger';
+    case 'BUGUN':
+    case 'KRITIK': return 'badge-warning';
+    case 'YAKIN': return 'badge-info';
+    default: return '';
+  }
+}
+
+/** Termin rozetinin metni. */
+function deliveryLabel(info: DeliveryInfo): string {
+  if (info.isDelivered) return 'Teslim edildi';
+  if (info.daysUntil === null) return 'Termin yok';
+  if (info.daysUntil < 0) return `${Math.abs(info.daysUntil)} gün gecikti`;
+  if (info.daysUntil === 0) return 'Termin bugün';
+  return `${info.daysUntil} gün kaldı`;
+}
 
 export function Contracts() {
   const confirmDelete = useDeleteConfirm();
@@ -175,6 +207,12 @@ export function Contracts() {
       endDate: contract.endDate ? contract.endDate.slice(0, 10) : '',
       renewalDate: contract.renewalDate ? contract.renewalDate.slice(0, 10) : '',
       description: contract.description ?? '',
+      deliveryDate: contract.deliveryDate ? contract.deliveryDate.slice(0, 10) : '',
+      deliveryNote: contract.deliveryNote ?? '',
+      deliveredAt: contract.deliveredAt ? contract.deliveredAt.slice(0, 10) : '',
+      cogs: contract.cogs != null ? String(contract.cogs) : '',
+      cogsCurrency: contract.cogsCurrency ?? 'USD',
+      cogsNote: contract.cogsNote ?? '',
     });
     setFormError(null);
     setFormOpen(true);
@@ -199,6 +237,14 @@ export function Contracts() {
         endDate: form.endDate || null,
         renewalDate: form.renewalDate || null,
         description: form.description || null,
+        deliveryDate: form.deliveryDate || null,
+        deliveryNote: form.deliveryNote || null,
+        deliveredAt: form.deliveredAt || null,
+        // Boş bırakılan maliyet 0 DEĞİL null'dur: "maliyet sıfır" ile
+        // "maliyet henüz bilinmiyor" farklı şeylerdir.
+        cogs: form.cogs === '' ? null : Number(form.cogs) || 0,
+        cogsCurrency: form.cogsCurrency,
+        cogsNote: form.cogsNote || null,
       };
 
       if (editing) await api.put(`/contracts/${editing.id}`, payload);
@@ -553,6 +599,32 @@ export function Contracts() {
                     )}
                   </span>
                 </SpecRow>
+                {/* Termin durumu künyede: satış ekibi sözleşmeyi açar açmaz görmeli. */}
+                {detail.delivery && detail.delivery.deliveryDate && (
+                  <SpecRow label="Termin">
+                    <span className="dual-amount">
+                      <span className="dual-primary">
+                        {new Date(detail.delivery.deliveryDate).toLocaleDateString('tr-TR')}
+                      </span>
+                      <span className={`badge ${deliveryBadgeClass(detail.delivery.urgency)}`}>
+                        {deliveryLabel(detail.delivery)}
+                      </span>
+                      {detail.delivery.slipDays > 0 && (
+                        <span className="rate-drift">
+                          İlk taahhütten {detail.delivery.slipDays} gün kaymış
+                        </span>
+                      )}
+                    </span>
+                  </SpecRow>
+                )}
+                {detail.cogs !== null && detail.cogs !== undefined && (
+                  <SpecRow label="Gerçekleşen Maliyet">
+                    {format(detail.cogs, detail.cogsCurrency)}
+                    {detail.cogsNote && (
+                      <div className="text-xs text-muted">{detail.cogsNote}</div>
+                    )}
+                  </SpecRow>
+                )}
                 <SpecRow label="Başlangıç">
                   {detail.startDate ? new Date(detail.startDate).toLocaleDateString('tr-TR') : null}
                 </SpecRow>
@@ -587,6 +659,58 @@ export function Contracts() {
                         <span className="badge badge-success">yok</span>
                       )}
                     </SpecRow>
+                  </div>
+                </>
+              )}
+
+              {/*
+                Sipariş stok durumu.
+
+                Teklif sözleşmeye dönüştüğünde taahhüt edilen adet ile
+                depodaki adet yan yana gösterilir: eksik varsa üretim/tedarik
+                planı sözleşme imzalanmadan önce netleşmeli.
+              */}
+              {detail.stockLines && detail.stockLines.length > 0 && (
+                <>
+                  <h3 className="mb-2 mt-4">
+                    <IconBox size={14} /> Stok Durumu
+                  </h3>
+                  <div className="table-wrap mb-3">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Ürün</th>
+                          <th className="text-right">Sipariş</th>
+                          <th className="text-right">Stok</th>
+                          <th className="text-right">Eksik</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.stockLines.map((line) => (
+                          <tr key={line.productId}>
+                            <td>
+                              <div className="font-semibold text-sm">{line.name}</div>
+                              <div className="text-xs text-muted mono">{line.sku}</div>
+                            </td>
+                            <td className="text-right nowrap">
+                              {line.orderedQuantity.toLocaleString('tr-TR')} {line.unit}
+                            </td>
+                            <td className="text-right nowrap">
+                              {line.stockQuantity.toLocaleString('tr-TR')}
+                            </td>
+                            <td className="text-right nowrap">
+                              {line.isSufficient ? (
+                                <span className="badge badge-success">Yeterli</span>
+                              ) : (
+                                <span className="badge badge-danger">
+                                  <IconAlert size={11} /> {line.shortage.toLocaleString('tr-TR')}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </>
               )}
@@ -900,6 +1024,87 @@ export function Contracts() {
             <input
               id="ct-renewal" className="input" type="date" value={form.renewalDate}
               onChange={(event) => setForm((prev) => ({ ...prev, renewalDate: event.target.value }))}
+            />
+          </div>
+        </div>
+
+        {/*
+          Termin takibi.
+
+          Tarih değiştirildiğinde sunucu revizyon damgası vurur ve zaman
+          tüneline kayıt düşer; ilk taahhüt ayrıca saklanır, böylece gecikme
+          her revizyonda sıfırlanmaz.
+        */}
+        <h3 className="mb-2 mt-3"><IconClock size={14} /> Termin (Teslimat)</h3>
+
+        <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-delivery">Termin Tarihi</label>
+            <input
+              id="ct-delivery" className="input" type="date" value={form.deliveryDate}
+              onChange={(event) => setForm((prev) => ({ ...prev, deliveryDate: event.target.value }))}
+            />
+            {editing?.originalDeliveryDate
+              && form.deliveryDate !== editing.originalDeliveryDate.slice(0, 10) && (
+              <span className="text-xs" style={{ color: 'var(--warning)' }}>
+                İlk taahhüt: {new Date(editing.originalDeliveryDate).toLocaleDateString('tr-TR')}
+              </span>
+            )}
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="ct-delivered">Teslim Edildi</label>
+            <input
+              id="ct-delivered" className="input" type="date" value={form.deliveredAt}
+              onChange={(event) => setForm((prev) => ({ ...prev, deliveredAt: event.target.value }))}
+            />
+            <span className="text-xs text-muted">Doldurulunca hatırlatıcılar susar.</span>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="ct-delivery-note">Revizyon Gerekçesi</label>
+            <input
+              id="ct-delivery-note" className="input" value={form.deliveryNote}
+              onChange={(event) => setForm((prev) => ({ ...prev, deliveryNote: event.target.value }))}
+              placeholder="Hammadde tedarik gecikmesi"
+            />
+          </div>
+        </div>
+
+        <h3 className="mb-2 mt-3">Gerçekleşen Maliyet (COGS)</h3>
+        <p className="text-xs text-muted mb-2">
+          Tekliften gelen tahmini maliyetin aksine sipariş kapandığında kesinleşen rakam.
+          Boş bırakılırsa "henüz bilinmiyor" sayılır.
+        </p>
+
+        <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-cogs">Tutar</label>
+            <input
+              id="ct-cogs" className="input" type="number" min={0} step="0.01" value={form.cogs}
+              onChange={(event) => setForm((prev) => ({ ...prev, cogs: event.target.value }))}
+            />
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="ct-cogs-cur">Para Birimi</label>
+            <select
+              id="ct-cogs-cur" className="select" value={form.cogsCurrency}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, cogsCurrency: event.target.value as CurrencyCode,
+              }))}
+            >
+              {CURRENCIES.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="ct-cogs-note">Not</label>
+            <input
+              id="ct-cogs-note" className="input" value={form.cogsNote}
+              onChange={(event) => setForm((prev) => ({ ...prev, cogsNote: event.target.value }))}
             />
           </div>
         </div>

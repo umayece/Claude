@@ -22,6 +22,7 @@ import { Trash } from './pages/Trash';
 import { EmailOutbox } from './pages/EmailOutbox';
 import { StickyNotesBoard } from './pages/StickyNotesBoard';
 import { Protocol } from './pages/Protocol';
+import { Activities } from './pages/Activities';
 import { Documents } from './pages/Documents';
 
 function FullPageLoader() {
@@ -71,6 +72,8 @@ export function App() {
         <Route path="tickets/:id" element={<Tickets />} />
         <Route path="tasks" element={<TasksCalendar />} />
         <Route path="notes" element={<StickyNotesBoard />} />
+        <Route path="activities" element={<Activities />} />
+        <Route path="activities/:id" element={<Activities />} />
         <Route path="protocol" element={<Protocol />} />
         <Route path="protocol/:id" element={<Protocol />} />
         <Route path="documents" element={<Documents />} />

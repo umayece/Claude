@@ -135,9 +135,27 @@ export interface ContactPhone {
   inactiveReason: string | null;
 }
 
+export type ContactType =
+  | 'Kurum Çalışanı' | 'Bağımsız Danışman' | 'Aracı/Komisyoncu'
+  | 'Askeri Ataşe' | 'Diğer';
+
+export const CONTACT_TYPES: ContactType[] = [
+  'Kurum Çalışanı', 'Bağımsız Danışman', 'Aracı/Komisyoncu',
+  'Askeri Ataşe', 'Diğer',
+];
+
 export interface Contact {
   id: string;
-  companyId: string;
+  /** Bağımsız kişilerde (danışman, aracı, ataşe) null olur. */
+  companyId: string | null;
+  contactType: ContactType;
+  /** Kuruma bağlı olmayan kişinin kendi adres/konum bilgisi. */
+  addressLine: string | null;
+  cityName: string | null;
+  country: string;
+  countryCode: string;
+  latitude: number | null;
+  longitude: number | null;
   firstName: string;
   lastName: string;
   title: string | null;
@@ -224,10 +242,21 @@ export interface OfferItem {
   quantity: number;
   unit: string;
   unitPrice: number;
+  /** Birim başına tahmini maliyet (Offer.costCurrency cinsinden). */
+  cost: number;
   taxRate: number;
   discountRate: number;
   lineTotal: number;
   sortOrder: number;
+}
+
+/** Teklif kârlılığı — sunucuda anlık kurla hesaplanır. */
+export interface OfferMargin {
+  revenueTry: number;
+  costTry: number;
+  grossProfitTry: number;
+  /** Ciro sıfırken marj tanımsızdır. */
+  marginPercent: number | null;
 }
 
 export interface Offer {
@@ -243,6 +272,9 @@ export interface Offer {
   subtotal: number;
   taxTotal: number;
   total: number;
+  costTotal: number;
+  costCurrency: CurrencyCode;
+  margin?: OfferMargin;
   totalTry?: number;
   amountTry?: number;
   amountUsd?: number;
@@ -301,15 +333,61 @@ export interface Contract {
   renewalDate: string | null;
   description: string | null;
   terms: string | null;
+
+  // --- Termin (teslimat) ---
+  deliveryDate: string | null;
+  originalDeliveryDate: string | null;
+  deliveryRevisedAt: string | null;
+  deliveryNote: string | null;
+  deliveredAt: string | null;
+  /** Sunucuda hesaplanan termin durumu. */
+  delivery?: DeliveryInfo;
+
+  // --- Gerçekleşen maliyet ---
+  cogs: number | null;
+  cogsCurrency: CurrencyCode;
+  cogsNote: string | null;
+
   createdAt: string;
   company?: { id: string; name: string };
   offer?: { id: string; offerNumber: string; title: string } | null;
   tender?: { id: string; tenderNumber: string; title: string } | null;
   milestones?: PaymentMilestone[];
+  /** Siparişe bağlı ürünlerin anlık stok durumu (detayda döner). */
+  stockLines?: StockLine[];
   milestoneSummary?: {
     total: number; collectedTry: number; pendingTry: number; overdueCount: number;
   };
   _count?: { milestones: number };
+}
+
+export type DeliveryUrgency = 'GECIKTI' | 'BUGUN' | 'KRITIK' | 'YAKIN' | 'UZAK' | 'YOK';
+
+export interface DeliveryInfo {
+  deliveryDate: string | null;
+  originalDeliveryDate: string | null;
+  /** Bugünden termine kalan tam gün; negatifse gecikme. */
+  daysUntil: number | null;
+  isOverdue: boolean;
+  isDelivered: boolean;
+  /** Tetiklenen eşik: 30, 15 veya 7. */
+  reminderTier: number | null;
+  urgency: DeliveryUrgency;
+  /** Orijinal taahhüde göre kayma (gün). */
+  slipDays: number;
+}
+
+/** Sipariş kaleminin taahhüt edilen adedi ile depodaki adedi. */
+export interface StockLine {
+  productId: string;
+  sku: string;
+  name: string;
+  unit: string;
+  orderedQuantity: number;
+  stockQuantity: number;
+  minStockLevel: number;
+  shortage: number;
+  isSufficient: boolean;
 }
 
 export interface Product {
@@ -659,6 +737,7 @@ export interface DocumentFile {
   tags: string[] | null;
   companyId: string | null;
   visitId: string | null;
+  activityId: string | null;
   createdAt: string;
   updatedAt?: string;
   company?: { id: string; name: string } | null;
@@ -695,4 +774,120 @@ export interface ProductPackaging {
   caseHeightCm: number | null;
   caseWeightKg: number | null;
   hazardClass: string | null;
+}
+
+
+// ===========================================================================
+// Aktivite havuzu (fuar, toplantı, saha ziyareti, fabrika gezisi)
+// ===========================================================================
+
+export type ActivityKind =
+  | 'TOPLANTI' | 'FUAR' | 'SAHA_ZIYARETI' | 'FABRIKA_GEZISI' | 'DIGER';
+export type ActivityStatus = 'Planlandı' | 'Devam Ediyor' | 'Tamamlandı' | 'İptal';
+export type InterestLevel = 'Sıcak' | 'Ilık' | 'Soğuk';
+
+export const ACTIVITY_KINDS: { key: ActivityKind; label: string }[] = [
+  { key: 'TOPLANTI', label: 'Toplantı' },
+  { key: 'FUAR', label: 'Fuar' },
+  { key: 'SAHA_ZIYARETI', label: 'Saha Ziyareti' },
+  { key: 'FABRIKA_GEZISI', label: 'Fabrika Gezisi' },
+  { key: 'DIGER', label: 'Diğer' },
+];
+
+export const ACTIVITY_STATUSES: ActivityStatus[] = [
+  'Planlandı', 'Devam Ediyor', 'Tamamlandı', 'İptal',
+];
+
+export const INTEREST_LEVELS: InterestLevel[] = ['Sıcak', 'Ilık', 'Soğuk'];
+
+export interface ActivityTeamMember {
+  id: string;
+  activityId: string;
+  userId: string | null;
+  fullName: string;
+  role: string | null;
+  /** Katılamayan kişi listeden silinmez, üstü çizilir. */
+  isAttending: boolean;
+  absenceReason: string | null;
+  sortOrder: number;
+}
+
+export interface ActivityContactLink {
+  id: string;
+  activityId: string;
+  contactId: string;
+  note: string | null;
+  interest: InterestLevel;
+  followedUp: boolean;
+  createdAt: string;
+  contact?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    title: string | null;
+    email: string | null;
+    contactType: ContactType;
+    country: string;
+    countryCode: string;
+    company?: { id: string; name: string } | null;
+  };
+}
+
+export interface BusinessActivity {
+  id: string;
+  activityCode: string;
+  title: string;
+  type: ActivityKind;
+  status: ActivityStatus;
+  startDate: string;
+  endDate: string | null;
+  location: string | null;
+  venue: string | null;
+  country: string;
+  countryCode: string;
+  objective: string | null;
+  summary: string | null;
+  /** Fuar Sonuç Raporu özet değerlendirme notu. */
+  outcomeNote: string | null;
+  /** Rapor ilk yazıldığında damgalanır. */
+  outcomeReportAt: string | null;
+  leadCount: number;
+  budgetAmount: number | null;
+  budgetCurrency: CurrencyCode;
+  ownerId: string | null;
+  companyId: string | null;
+  dealId: string | null;
+  createdAt: string;
+  owner?: { id: string; name: string } | null;
+  company?: { id: string; name: string } | null;
+  deal?: { id: string; title: string; stage: string } | null;
+  team?: ActivityTeamMember[];
+  contacts?: ActivityContactLink[];
+  documents?: DocumentFile[];
+  _count?: { team: number; contacts: number; documents: number };
+}
+
+export interface ActivitySummary {
+  total: number;
+  upcoming: number;
+  fairs: number;
+  /** Bitmiş ama sonuç raporu yazılmamış fuarlar. */
+  awaitingReport: number;
+}
+
+// ===========================================================================
+// Bildirimler (gecikmiş görev + termin uyarıları)
+// ===========================================================================
+
+export type NotificationKind = 'TASK_OVERDUE' | 'DELIVERY_DUE' | 'DELIVERY_OVERDUE';
+
+export interface NotificationItem {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  href: string;
+  severity: number;
+  dueDate: string | null;
+  daysUntil: number | null;
 }

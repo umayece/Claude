@@ -148,3 +148,12 @@ export const IconInbox = (p: IconProps) => (
 export const IconCredit = (p: IconProps) => (
   <Icon {...p}><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></Icon>
 );
+export const IconTruck = (p: IconProps) => (
+  <Icon {...p}><path d="M14 18V6a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h2" /><path d="M14 9h4l3 3v5a1 1 0 0 1-1 1h-1" /><circle cx="7" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></Icon>
+);
+export const IconTarget = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></Icon>
+);
+export const IconFlag = (p: IconProps) => (
+  <Icon {...p}><path d="M4 22V4a1 1 0 0 1 1-1h10l-1.5 4L15 11H5" /></Icon>
+);

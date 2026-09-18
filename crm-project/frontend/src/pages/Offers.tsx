@@ -12,7 +12,8 @@ import { IconFile, IconPlus, IconSearch, IconTrash } from '../components/Icons';
 import type { Company, CurrencyCode, Offer, Paginated, Product } from '../types';
 
 const OFFER_STATUSES = ['Taslak', 'Gönderildi', 'Revize', 'Kabul', 'Ret', 'Süresi Doldu'] as const;
-const CURRENCIES: CurrencyCode[] = ['TRY', 'USD', 'EUR', 'GBP'];
+// USD ilk sırada: savunma sanayii satışları ağırlıklı dövizlidir.
+const CURRENCIES: CurrencyCode[] = ['USD', 'TRY', 'EUR', 'GBP'];
 
 interface LineItem {
   key: string;
@@ -22,6 +23,8 @@ interface LineItem {
   quantity: string;
   unit: string;
   unitPrice: string;
+  /** Birim başına tahmini maliyet — teklifin maliyet para biriminde. */
+  cost: string;
   taxRate: string;
   discountRate: string;
 }
@@ -33,6 +36,7 @@ interface OfferForm {
   dealId: string | null;
   status: string;
   currency: CurrencyCode;
+  costCurrency: CurrencyCode;
   validUntil: string;
   notes: string;
   items: LineItem[];
@@ -42,13 +46,15 @@ function emptyLine(index: number): LineItem {
   return {
     key: `line-${Date.now()}-${index}`,
     productId: null, name: '', description: '',
-    quantity: '1', unit: 'Adet', unitPrice: '0', taxRate: '20', discountRate: '0',
+    quantity: '1', unit: 'Adet', unitPrice: '0', cost: '0',
+    taxRate: '20', discountRate: '0',
   };
 }
 
 const EMPTY_OFFER: OfferForm = {
   title: '', companyId: null, contactId: null, dealId: null,
-  status: 'Taslak', currency: 'TRY', validUntil: '', notes: '', items: [emptyLine(0)],
+  status: 'Taslak', currency: 'USD', costCurrency: 'USD',
+  validUntil: '', notes: '', items: [emptyLine(0)],
 };
 
 export function Offers() {
@@ -56,7 +62,7 @@ export function Offers() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { can } = useAuth();
-  const { format } = useExchangeRates();
+  const { format, toTry } = useExchangeRates();
 
   const [term, setTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -188,18 +194,43 @@ export function Offers() {
   const totals = useMemo(() => {
     let subtotal = 0;
     let taxTotal = 0;
+    let costTotal = 0;
     for (const item of form.items) {
-      const gross = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+      const quantity = Number(item.quantity) || 0;
+      const gross = quantity * (Number(item.unitPrice) || 0);
       const net = gross * (1 - (Number(item.discountRate) || 0) / 100);
       subtotal += net;
       taxTotal += net * ((Number(item.taxRate) || 0) / 100);
+      costTotal += quantity * (Number(item.cost) || 0);
     }
     return {
       subtotal: Math.round(subtotal * 100) / 100,
       taxTotal: Math.round(taxTotal * 100) / 100,
       total: Math.round((subtotal + taxTotal) * 100) / 100,
+      costTotal: Math.round(costTotal * 100) / 100,
     };
   }, [form.items]);
+
+  /**
+   * Anlık brüt kâr / marj.
+   *
+   * Maliyet farklı bir para biriminde olabileceği için karşılaştırma
+   * TL'ye çevrilerek yapılır — iki ayrı birimi doğrudan çıkarmak sessiz
+   * ve büyük bir hata olurdu. KDV hariç net satış esas alınır: KDV
+   * devlete aittir, kâr değildir.
+   */
+  const margin = useMemo(() => {
+    const revenueTry = toTry(totals.subtotal, form.currency);
+    const costTry = toTry(totals.costTotal, form.costCurrency);
+    const profitTry = revenueTry - costTry;
+    return {
+      revenueTry,
+      costTry,
+      profitTry,
+      // Ciro sıfırken marj tanımsızdır; 0 göstermek "sıfır kâr" yanılgısı yaratır.
+      percent: revenueTry > 0 ? (profitTry / revenueTry) * 100 : null,
+    };
+  }, [totals.subtotal, totals.costTotal, form.currency, form.costCurrency, toTry]);
 
   const updateLine = (key: string, patch: Partial<LineItem>): void => {
     setForm((prev) => ({
@@ -245,6 +276,7 @@ export function Offers() {
         dealId: form.dealId,
         status: form.status,
         currency: form.currency,
+        costCurrency: form.costCurrency,
         validUntil: form.validUntil || null,
         notes: form.notes || null,
         items: validItems.map((item, index) => ({
@@ -254,6 +286,7 @@ export function Offers() {
           quantity: Number(item.quantity) || 0,
           unit: item.unit,
           unitPrice: Number(item.unitPrice) || 0,
+          cost: Number(item.cost) || 0,
           taxRate: Number(item.taxRate) || 0,
           discountRate: Number(item.discountRate) || 0,
           sortOrder: index,
@@ -538,6 +571,16 @@ export function Offers() {
               </div>
 
               <div className="field" style={{ marginBottom: 0 }}>
+                <label className="field-label" title="Birim başına tahmini maliyet">
+                  Maliyet ({form.costCurrency})
+                </label>
+                <input
+                  className="input" type="number" min={0} step="0.01" value={item.cost}
+                  onChange={(event) => updateLine(item.key, { cost: event.target.value })}
+                />
+              </div>
+
+              <div className="field" style={{ marginBottom: 0 }}>
                 <label className="field-label">İskonto %</label>
                 <input
                   className="input" type="number" min={0} max={100} step="0.1" value={item.discountRate}
@@ -590,6 +633,73 @@ export function Offers() {
           </div>
         </div>
 
+        {/*
+          Kârlılık kutusu.
+
+          Satış ve maliyet farklı para birimlerinde olabildiği için
+          karşılaştırma anlık kurla TL'ye çevrilerek yapılır. KDV hariç
+          tutulur: KDV devlete aittir, kâr değildir.
+        */}
+        <div className="grid grid-3 mt-3">
+          <div className="kpi">
+            <div className="kpi-label">Tahmini Maliyet</div>
+            <div className="kpi-value" style={{ fontSize: 18 }}>
+              {format(totals.costTotal, form.costCurrency)}
+            </div>
+            <div className="kpi-sub">≈ {format(margin.costTry, 'TRY')}</div>
+          </div>
+
+          <div className="kpi">
+            <div className="kpi-label">Brüt Kâr (KDV hariç)</div>
+            <div
+              className="kpi-value"
+              style={{
+                fontSize: 18,
+                color: margin.profitTry >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}
+            >
+              {format(margin.profitTry, 'TRY')}
+            </div>
+            <div className="kpi-sub">Net satış ≈ {format(margin.revenueTry, 'TRY')}</div>
+          </div>
+
+          <div className="kpi">
+            <div className="kpi-label">Brüt Marj</div>
+            <div
+              className="kpi-value"
+              style={{
+                fontSize: 18,
+                color: margin.percent === null
+                  ? 'var(--text-faint)'
+                  : margin.percent >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}
+            >
+              {margin.percent === null ? '—' : `%${margin.percent.toFixed(1)}`}
+            </div>
+            <div className="kpi-sub">
+              {margin.percent === null ? 'Satış tutarı girilmedi' : 'Anlık kurla hesaplandı'}
+            </div>
+          </div>
+        </div>
+
+        <div className="field mt-3" style={{ marginBottom: 0 }}>
+          <label className="field-label" htmlFor="of-cost-cur">Maliyet Para Birimi</label>
+          <select
+            id="of-cost-cur" className="select" style={{ maxWidth: 200 }}
+            value={form.costCurrency}
+            onChange={(event) => setForm((prev) => ({
+              ...prev, costCurrency: event.target.value as CurrencyCode,
+            }))}
+          >
+            {CURRENCIES.map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
+          </select>
+          <span className="text-xs text-muted">
+            Hammadde farklı bir dövizle alınıyorsa satış para biriminden farklı seçebilirsiniz.
+          </span>
+        </div>
+
         <div className="field mt-3" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="of-notes">Notlar</label>
           <textarea
@@ -628,6 +738,25 @@ export function Offers() {
                 {/* Onaylanmış teklif resmiyet kazanmıştır: teklif tarihindeki
                     kur muhasebe kaydıdır, bugünkü kur piyasa gerçeğidir.
                     İkisi yan yana gösterilir; taslakta yalnızca anlık değer. */}
+                {detail.margin && (
+                  <div className="dual-amount mt-1">
+                    <span className="dual-secondary">
+                      Maliyet: {format(detail.costTotal, detail.costCurrency)}
+                    </span>
+                    <span
+                      className="dual-secondary"
+                      style={{
+                        color: detail.margin.grossProfitTry >= 0
+                          ? 'var(--success)' : 'var(--danger)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Brüt kâr: {format(detail.margin.grossProfitTry, 'TRY')}
+                      {detail.margin.marginPercent !== null
+                        && ` (%${detail.margin.marginPercent.toFixed(1)})`}
+                    </span>
+                  </div>
+                )}
                 {detail.currency !== 'TRY' && (
                   <div className="dual-amount mt-1">
                     {detail.amountTryAtCreation !== null

@@ -11,7 +11,7 @@ import { validate, validated } from '../middleware/validate';
 import { auditAction } from '../middleware/audit';
 import { logActivity } from '../services/activity.service';
 import {
-  dualValue, getRateMap, shouldFreezeRate, SUPPORTED_CURRENCIES,
+  dualValue, getRateMap, shouldFreezeRate, SUPPORTED_CURRENCIES, toTryAt, type RateMap,
 } from '../services/currency.service';
 import { nextSequence } from '../services/sequence.service';
 
@@ -28,6 +28,8 @@ const itemSchema = z.object({
   quantity: z.number().min(0).max(1e9).default(1),
   unit: z.string().trim().max(20).default('Adet'),
   unitPrice: z.number().min(0).max(1e12).default(0),
+  /** Birim başına tahmini maliyet (teklifin costCurrency'si cinsinden). */
+  cost: z.number().min(0).max(1e12).default(0),
   taxRate: z.number().min(0).max(100).default(20),
   discountRate: z.number().min(0).max(100).default(0),
   sortOrder: z.number().int().min(0).max(999).default(0),
@@ -40,7 +42,9 @@ const offerBodySchema = z.object({
   dealId: z.string().uuid().nullish(),
   offerNumber: z.string().trim().max(60).optional(),
   status: z.enum(OFFER_STATUSES).default('Taslak'),
-  currency: z.enum(SUPPORTED_CURRENCIES).default('TRY'),
+  currency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
+  /** Maliyet para birimi satış para biriminden farklı olabilir. */
+  costCurrency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
   validUntil: z.coerce.date().nullish(),
   notes: z.string().max(5000).nullish(),
   terms: z.string().max(50_000).nullish(),
@@ -68,6 +72,7 @@ const offerInclude = {
 function computeTotals(items: z.infer<typeof itemSchema>[]) {
   let subtotal = 0;
   let taxTotal = 0;
+  let costTotal = 0;
 
   const lines = items.map((item) => {
     const gross = item.quantity * item.unitPrice;
@@ -75,6 +80,7 @@ function computeTotals(items: z.infer<typeof itemSchema>[]) {
     const tax = net * (item.taxRate / 100);
     subtotal += net;
     taxTotal += tax;
+    costTotal += item.quantity * item.cost;
     return { ...item, lineTotal: Math.round((net + tax) * 100) / 100 };
   });
 
@@ -83,6 +89,34 @@ function computeTotals(items: z.infer<typeof itemSchema>[]) {
     subtotal: Math.round(subtotal * 100) / 100,
     taxTotal: Math.round(taxTotal * 100) / 100,
     total: Math.round((subtotal + taxTotal) * 100) / 100,
+    costTotal: Math.round(costTotal * 100) / 100,
+  };
+}
+
+/**
+ * Brüt kâr ve marj.
+ *
+ * Maliyet farklı bir para biriminde olabileceği için karşılaştırma ANLIK
+ * kurla TL'ye çevrilerek yapılır — iki farklı birimi doğrudan çıkarmak
+ * sessiz ve büyük bir hata olurdu. KDV hariç net satış esas alınır:
+ * KDV devlete aittir, kâr değildir.
+ */
+function computeMargin(
+  subtotal: number, currency: string,
+  costTotal: number, costCurrency: string,
+  rates: RateMap,
+) {
+  const revenueTry = toTryAt(subtotal, currency, rates);
+  const costTry = toTryAt(costTotal, costCurrency, rates);
+  const grossProfitTry = Math.round((revenueTry - costTry) * 100) / 100;
+  return {
+    revenueTry: Math.round(revenueTry * 100) / 100,
+    costTry: Math.round(costTry * 100) / 100,
+    grossProfitTry,
+    // Ciro sıfırken marj tanımsızdır; 0 döndürmek "sıfır kâr" yanılgısı yaratır.
+    marginPercent: revenueTry > 0
+      ? Math.round((grossProfitTry / revenueTry) * 1000) / 10
+      : null,
   };
 }
 
@@ -131,6 +165,9 @@ router.get(
         ...offer,
         ...dualValue(offer.total, offer.currency, offer.exchangeRateAtCreation, rates),
         totalTry: dualValue(offer.total, offer.currency, offer.exchangeRateAtCreation, rates).amountTry,
+        margin: computeMargin(
+          offer.subtotal, offer.currency, offer.costTotal, offer.costCurrency, rates,
+        ),
       })),
       total,
       page,
@@ -150,7 +187,10 @@ router.get(
     if (!offer) throw NotFound('Teklif bulunamadı.');
     const rates = await getRateMap();
     const valuation = dualValue(offer.total, offer.currency, offer.exchangeRateAtCreation, rates);
-    res.json({ ...offer, ...valuation, totalTry: valuation.amountTry });
+    const margin = computeMargin(
+      offer.subtotal, offer.currency, offer.costTotal, offer.costCurrency, rates,
+    );
+    res.json({ ...offer, ...valuation, totalTry: valuation.amountTry, margin });
   }),
 );
 
@@ -180,6 +220,8 @@ router.post(
           : null,
         subtotal: totals.subtotal,
         taxTotal: totals.taxTotal,
+        costTotal: totals.costTotal,
+        costCurrency: body.costCurrency,
         total: totals.total,
         validUntil: body.validUntil ?? null,
         notes: body.notes ?? null,
@@ -192,6 +234,7 @@ router.post(
             quantity: line.quantity,
             unit: line.unit,
             unitPrice: line.unitPrice,
+            cost: line.cost,
             taxRate: line.taxRate,
             discountRate: line.discountRate,
             lineTotal: line.lineTotal,
@@ -254,6 +297,7 @@ router.put(
             quantity: line.quantity,
             unit: line.unit,
             unitPrice: line.unitPrice,
+            cost: line.cost,
             taxRate: line.taxRate,
             discountRate: line.discountRate,
             lineTotal: line.lineTotal,
@@ -262,7 +306,13 @@ router.put(
         });
         await tx.offer.update({
           where: { id },
-          data: { subtotal: totals.subtotal, taxTotal: totals.taxTotal, total: totals.total },
+          data: {
+            subtotal: totals.subtotal,
+            taxTotal: totals.taxTotal,
+            total: totals.total,
+            costTotal: totals.costTotal,
+            ...(body.costCurrency !== undefined ? { costCurrency: body.costCurrency } : {}),
+          },
         });
       }
 

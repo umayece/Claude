@@ -76,7 +76,10 @@ router.post(
     let resolvedCompanyId = body.companyId ?? null;
     if (body.contactId) {
       const contact = await prisma.contact.findFirst({
-        where: { id: body.contactId, deletedAt: null, company: companyScope(req.user) },
+        where: {
+          id: body.contactId, deletedAt: null,
+          OR: [{ companyId: null }, { company: companyScope(req.user) }],
+        },
         select: { id: true, companyId: true, firstName: true, lastName: true },
       });
       if (!contact) throw NotFound('Kişi bulunamadı.');

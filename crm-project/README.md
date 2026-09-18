@@ -412,3 +412,140 @@ Bu ayarlar bilinçli tercihtir; geri alınırsa derleme çöker.
   `prisma migrate deploy` boş bir `prisma/migrations` klasöründe hiçbir tablo
   oluşturmadan başarıyla çıkıyor, backend de ilk sorguda
   "relation does not exist" ile ölüyordu.
+
+
+---
+
+## Esnek veri girişi
+
+### Şirketsiz (bağımsız) kişiler
+
+`Contact.companyId` **nullable**'dır. Bağımsız danışman, aracı, komisyoncu ve
+askeri ataşe hiçbir kuruma bağlı olmadan kaydedilir — sırf kişiyi
+kaydedebilmek için sahte şirket açmak veriyi bozar.
+
+Bağımsız kişi kendi `addressLine`, `cityName`, `country`, `countryCode`,
+`latitude` ve `longitude` bilgisini taşır; `contactType` alanı kişiyi
+sınıflandırır (Kurum Çalışanı / Bağımsız Danışman / Aracı-Komisyoncu /
+Askeri Ataşe / Diğer).
+
+**Erişim kapsamı.** Bağımsız kişi hiçbir departmana ait olmadığı için
+departman kapsamı ona uygulanamaz; `contact:read` yetkisi olan herkes görür.
+Kuruma bağlı kişiler eskisi gibi kapsamlanır. Kapsam sorgusu
+`{ OR: [{ companyId: null }, { company: companyScope(user) }] }` biçimindedir
+ve kişi listesi, tekil erişim, genel arama, takvim (doğum günleri), e-posta
+ve kontrol paneli sayacının **hepsinde** aynı şekilde uygulanır — biri
+atlansaydı bağımsız kişiler o ekranda görünmez olurdu.
+
+### Varsayılan para birimi
+
+Fırsat, Teklif, Sözleşme ve Ürün formlarında para birimi **USD** olarak
+gelir; TRY, EUR ve GBP listeden seçilebilir. İhale (Tender) **TRY** kalır:
+yurt içi kamu ihaleleri TL üzerinden yürür.
+
+---
+
+## Teklif maliyeti ve kârlılık
+
+`OfferItem.cost` birim başına tahmini maliyeti, `Offer.costTotal` toplamı,
+`Offer.costCurrency` maliyet para birimini tutar. Maliyet para birimi satış
+para biriminden **farklı olabilir**: hammadde USD alınıp teklif EUR
+verilebilir.
+
+Brüt kâr ve marj hem formda anlık, hem de sunucu yanıtında (`margin`)
+hesaplanır. İki kural:
+
+- Karşılaştırma **anlık kurla TL'ye çevrilerek** yapılır — iki farklı
+  para birimini doğrudan çıkarmak sessiz ve büyük bir hata olurdu.
+- **KDV hariç** net satış esas alınır: KDV devlete aittir, kâr değildir.
+- Ciro sıfırken marj `null` döner; `0` göstermek "sıfır kâr" yanılgısı yaratır.
+
+---
+
+## Sipariş, stok ve termin
+
+### Stok
+
+Sözleşme detayında, bağlı teklifin kalemleri için ürünün **anlık depo
+stoğu** taahhüt edilen adetle yan yana gösterilir (`stockLines`). Eksik
+varsa üretim/tedarik planı sözleşme imzalanmadan netleşmelidir.
+
+### Gerçekleşen maliyet (COGS)
+
+`Contract.cogs` + `cogsCurrency` + `cogsNote`. Tekliften gelen tahmini
+maliyetin aksine sipariş kapandığında kesinleşen rakamdır. Boş bırakılırsa
+"henüz bilinmiyor" sayılır — `0` ile `null` farklı şeylerdir.
+
+### Termin (teslimat)
+
+`Contract.deliveryDate` yetkili tarafından revize edilebilir.
+`originalDeliveryDate` ilk taahhüdü saklar: gecikme ölçümü **orijinal**
+termine göre yapılır, aksi halde her revizyon gecikmeyi sıfırlar ve tedarik
+performansı ölçülemez hâle gelir. Her revizyonda `deliveryRevisedAt`
+damgalanır ve zaman tüneline "kimden kime" kaydı düşer.
+
+Hatırlatıcılar `delivery.service.ts` içinde **tek bir yerde** tanımlıdır —
+eşikler iki yerde ayrı hesaplansaydı ekranlar birbirini tutmazdı:
+
+- Eşikler **30, 15 ve 7 gün**. En dar eşik kazanır: 5 gün kalmışsa uyarı
+  "7 gün" seviyesindedir.
+- Gün farkı **takvim günü** olarak hesaplanır; ham milisaniye bölünseydi
+  sonuç kaydın saatine göre bir gün oynardı.
+- `deliveredAt` dolu olan siparişler hatırlatıcı üretmez.
+- Gecikmiş olanlar eşik dışı da olsa her zaman düşer.
+
+Uyarılar iki yerde görünür ve **ikisi de aynı uç noktadan** beslenir
+(`GET /api/v1/notifications`): bildirim zili ve kontrol panelindeki termin
+şeridi. Zil ayrıca gecikmiş görevleri de aynı sıralı listede taşır.
+
+---
+
+## Aktivite havuzu ve fuar yönetimi
+
+`BusinessActivity` modeli fuar, toplantı, saha ziyareti ve fabrika gezisini
+tutar. Zaman tünelini besleyen `Activity` kaydından **ayrıdır**: `Activity`
+otomatik üretilen bir olay günlüğü, `BusinessActivity` ise elle planlanan
+ticari bir etkinliktir. İkisi tek modelde birleştirilseydi zaman tünelleri
+planlama kayıtlarıyla kirlenirdi.
+
+Etkinlik hiçbir kuruma bağlı olmak zorunda değildir — IDEF kimsenin müşterisi
+değil, kendi başına bir etkinliktir.
+
+**Fuar Sonuç Raporu.** Etkinliğin `outcomeNote` alanına özet değerlendirme
+yazılır; hazırlanan PDF/Word dosyası `DocumentFile` olarak
+`FUAR_SONUC_RAPORU` kategorisiyle aktiviteye yüklenir. `outcomeReportAt`
+damgası **ilk** kaydetmede vurulur; sonraki düzeltmeler damgayı ileri
+taşımaz — rapor tarihi teslim tarihidir, son düzenleme tarihi değil.
+Bitmiş ama raporu yazılmamış fuarlar `?awaitingReport=true` ile listelenir
+ve üst şeritte sayılır.
+
+**Kartvizitler.** Fuarda görüşülen kişiler tek tıkla kayda bağlanır
+(`ActivityContact`), ilgi seviyesi (Sıcak/Ilık/Soğuk) ve görüşme notuyla.
+Kişi sistemde yoksa aynı ekrandan **şirketsiz** olarak açılır ve varsayılan
+olarak **etkinliğin ülkesine** bağlanır. Bağlantı kaldırıldığında kişi
+silinmez: kartvizit sisteme girdikten sonra fuar kaydından kopması kişiyi
+yok saymayı gerektirmez.
+
+**Ekip.** Katılamayacağını bildiren kişi listeden silinmez, `isAttending`
+false yapılır ve adının üzeri çizilir — kimin davet edildiği kaydın bir
+parçasıdır.
+
+---
+
+## Mühimmat lojistik hesabı
+
+`LogisticsCalculator` kalibre ön tanımları taşır: 9x19, 5.56x45, 7.62x51,
+12.7x99, 40 mm, 81 mm, 120 mm ve 155 mm. Kalibre seçilip sipariş adedi
+girildiğinde sandık adedi, brüt ağırlık ve hacim otomatik çıkar; 20FT /
+40FT / 40HC konteyner doluluğu görselleşir.
+
+> **Uyarı:** Ön tanım değerleri NATO standart ambalajı için **yaklaşıktır**.
+> Gerçek sevkiyatta üreticinin teknik veri sayfasındaki sandık ölçüsü ve
+> brüt ağırlık esas alınmalıdır; ambalaj lot, fitil ve paketleme tipine göre
+> değişir. Seçim sonrası tüm alanlar elle düzeltilebilir ve hesap
+> düzeltilmiş değerlerle yapılır.
+
+Hesap **hacim ve ağırlık** sınırlarını birlikte gözetir ve ikisinden
+**büyük** olanı gerekli konteyner sayısını belirler: mühimmatta genellikle
+konteyner hacmi dolmadan yük sınırına ulaşılır, yalnızca hacme bakan bir
+hesap gerçekte taşınamayacak bir plan üretir.

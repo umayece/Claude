@@ -4,9 +4,9 @@ import { api } from '../api/client';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { FunnelChart, PieChart, SparkBars } from '../components/Charts';
 import {
-  IconAlert, IconBuilding, IconGavel, IconTrending, IconUsers, IconWrench,
+  IconAlert, IconBuilding, IconGavel, IconTrending, IconTruck, IconUsers, IconWrench,
 } from '../components/Icons';
-import type { DashboardData } from '../types';
+import type { DashboardData, NotificationItem } from '../types';
 
 type RangePreset = '7d' | '30d' | 'quarter' | 'year' | 'custom';
 
@@ -52,6 +52,9 @@ export function Dashboard() {
   const [customTo, setCustomTo] = useLocalStorage('crm:dashboard:to', '');
 
   const [data, setData] = useState<DashboardData | null>(null);
+  // Termin uyarıları zil ile aynı uç noktadan gelir: iki ekran asla
+  // birbirinden farklı bir liste göstermez.
+  const [alerts, setAlerts] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,6 +90,23 @@ export function Dashboard() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load, range, customFrom, customTo]);
+
+  // Termin uyarıları dönem filtresinden BAĞIMSIZDIR: "son 7 gün" seçili
+  // olsa bile 30 gün sonra terminlenen bir sipariş görünmelidir.
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await api.get<{ data: NotificationItem[] }>(
+          '/notifications', undefined, controller.signal,
+        );
+        setAlerts(response.data.filter((item) => item.kind !== 'TASK_OVERDUE'));
+      } catch {
+        // Uyarı şeridi kritik değil; alınamazsa gizlenir.
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   const kpis = data?.kpis;
 
@@ -182,6 +202,60 @@ export function Dashboard() {
             Kullanıcı hangi kurun kullanıldığını bilmeli — aksi halde iki
             farklı zamanda açılan ekranlardaki fark hata sanılır.
           */}
+          {/*
+            Termin uyarı şeridi.
+
+            30/15/7 gün eşikleri ve gecikenler; zil ile aynı kaynaktan
+            geldiği için iki ekran asla çelişmez.
+          */}
+          {alerts.length > 0 && (
+            <div className="card mb-4">
+              <div className="card-header">
+                <h3><IconTruck size={15} /> Termin Uyarıları ({alerts.length})</h3>
+                <button
+                  type="button" className="btn btn-sm btn-ghost"
+                  onClick={() => navigate('/contracts')}
+                >
+                  Sözleşmeler
+                </button>
+              </div>
+              <div className="card-body" style={{ paddingTop: 8, paddingBottom: 8 }}>
+                {alerts.slice(0, 6).map((alert) => (
+                  <button
+                    key={alert.id}
+                    type="button"
+                    className="delivery-alert"
+                    onClick={() => navigate(alert.href)}
+                  >
+                    <span
+                      className={`delivery-dot ${
+                        alert.kind === 'DELIVERY_OVERDUE'
+                          ? 'is-overdue'
+                          : (alert.daysUntil ?? 99) <= 7 ? 'is-critical' : 'is-near'
+                      }`}
+                    />
+                    <span className="delivery-alert-main">
+                      <span className="delivery-alert-title">{alert.title}</span>
+                      <span className="delivery-alert-meta">{alert.body}</span>
+                    </span>
+                    <span className="delivery-alert-days">
+                      {alert.daysUntil === null
+                        ? '—'
+                        : alert.daysUntil < 0
+                          ? `${Math.abs(alert.daysUntil)} gün geç`
+                          : `${alert.daysUntil} gün`}
+                    </span>
+                  </button>
+                ))}
+                {alerts.length > 6 && (
+                  <p className="text-xs text-muted mt-2">
+                    +{alerts.length - 6} uyarı daha. Tümü için sözleşmeler ekranına bakın.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {valuationLabel(data.valuation?.valuedAt) && (
             <p className="text-xs text-muted mb-4">
               Döviz tutarları bugünkü {valuationLabel(data.valuation?.valuedAt)} TL karşılığına

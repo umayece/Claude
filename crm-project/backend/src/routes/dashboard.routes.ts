@@ -63,7 +63,16 @@ router.get(
     ] = await prisma.$transaction([
       prisma.company.count({ where: { AND: [{ deletedAt: null }, scope] } }),
       prisma.company.count({ where: { AND: [{ deletedAt: null }, scope, { createdAt: period }] } }),
-      prisma.contact.count({ where: { AND: [{ deletedAt: null }, { company: scope }] } }),
+      prisma.contact.count({
+        where: {
+          AND: [
+            { deletedAt: null },
+            // Bağımsız kişiler de sayılır; hiçbir departmana ait olmadıkları
+            // için kurum kapsamı onlara uygulanamaz.
+            { OR: [{ companyId: null }, { company: scope }] },
+          ],
+        },
+      }),
       prisma.deal.findMany({
         where: dealWhere,
         select: { stage: true, amount: true, currency: true, createdAt: true },

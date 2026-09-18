@@ -8,7 +8,7 @@ import { prisma } from '../lib/prisma';
  * çakışma halinde bir sonraki boşta numara denenir.
  */
 export async function nextSequence(
-  prefix: 'TKL' | 'IHL' | 'SZL' | 'TKT' | 'ZYR',
+  prefix: 'TKL' | 'IHL' | 'SZL' | 'TKT' | 'ZYR' | 'AKT',
 ): Promise<string> {
   const year = new Date().getFullYear();
   const pattern = `${prefix}-${year}-`;
@@ -64,6 +64,14 @@ async function findLatest(prefix: string, pattern: string): Promise<number> {
       });
       return parse(row?.visitCode);
     }
+    case 'AKT': {
+      const row = await prisma.businessActivity.findFirst({
+        where: { activityCode: { startsWith: pattern } },
+        orderBy: { activityCode: 'desc' },
+        select: { activityCode: true },
+      });
+      return parse(row?.activityCode);
+    }
     default: {
       const row = await prisma.ticket.findFirst({
         where: { ticketNumber: { startsWith: pattern } },
@@ -85,6 +93,8 @@ async function exists(prefix: string, candidate: string): Promise<boolean> {
       return (await prisma.contract.count({ where: { contractNumber: candidate } })) > 0;
     case 'ZYR':
       return (await prisma.protocolVisit.count({ where: { visitCode: candidate } })) > 0;
+    case 'AKT':
+      return (await prisma.businessActivity.count({ where: { activityCode: candidate } })) > 0;
     default:
       return (await prisma.ticket.count({ where: { ticketNumber: candidate } })) > 0;
   }

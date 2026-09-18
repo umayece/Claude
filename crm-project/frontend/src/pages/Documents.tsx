@@ -13,7 +13,8 @@ import type { DocumentFile, Paginated } from '../types';
 
 const CATEGORIES = [
   'PAZAR_ANALIZI', 'ULKE_BRIFINGI', 'DIPLOMATIK_NOTA', 'PASAPORT_LISTESI',
-  'SUNUM', 'SOZLESME_ORNEGI', 'TEKNIK_DOKUMAN', 'DIGER',
+  'SUNUM', 'SOZLESME_ORNEGI', 'TEKNIK_DOKUMAN',
+  'FUAR_SONUC_RAPORU', 'ETKINLIK_BELGESI', 'DIGER',
 ] as const;
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -24,6 +25,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   SUNUM: 'Brifing Sunumu',
   SOZLESME_ORNEGI: 'Sözleşme Örneği',
   TEKNIK_DOKUMAN: 'Teknik Doküman',
+  FUAR_SONUC_RAPORU: 'Fuar Sonuç Raporu',
+  ETKINLIK_BELGESI: 'Etkinlik Belgesi',
   DIGER: 'Diğer',
 };
 

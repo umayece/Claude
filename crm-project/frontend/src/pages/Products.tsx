@@ -14,7 +14,8 @@ import type { CurrencyCode, Paginated, Product } from '../types';
 
 const CATEGORIES = ['Mühimmat', 'Ağır Silah', 'Kimyasal', 'Yedek Parça', 'Hizmet', 'Diğer'];
 const UNITS = ['Adet', 'Kg', 'Ton', 'Koli', 'Saat', 'Metre'];
-const CURRENCIES: CurrencyCode[] = ['TRY', 'USD', 'EUR', 'GBP'];
+// USD ilk sırada: savunma sanayii satışları ağırlıklı dövizlidir.
+const CURRENCIES: CurrencyCode[] = ['USD', 'TRY', 'EUR', 'GBP'];
 
 interface FormState {
   sku: string;
@@ -32,7 +33,7 @@ interface FormState {
 
 const EMPTY: FormState = {
   sku: '', name: '', description: '', category: 'Yedek Parça', unitPrice: '0',
-  currency: 'TRY', taxRate: '20', stockQuantity: '0', minStockLevel: '0',
+  currency: 'USD', taxRate: '20', stockQuantity: '0', minStockLevel: '0',
   unit: 'Adet', isActive: true,
 };
 

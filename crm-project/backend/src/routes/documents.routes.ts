@@ -15,7 +15,10 @@ router.use(authenticate, requireMfaComplete);
 
 export const DOCUMENT_CATEGORIES = [
   'PAZAR_ANALIZI', 'ULKE_BRIFINGI', 'DIPLOMATIK_NOTA', 'PASAPORT_LISTESI',
-  'SUNUM', 'SOZLESME_ORNEGI', 'TEKNIK_DOKUMAN', 'DIGER',
+  'SUNUM', 'SOZLESME_ORNEGI', 'TEKNIK_DOKUMAN',
+  // Fuar/etkinlik sonrası ekibin hazırladığı değerlendirme raporu.
+  'FUAR_SONUC_RAPORU', 'ETKINLIK_BELGESI',
+  'DIGER',
 ] as const;
 
 export const CLASSIFICATIONS = ['Tasnif Dışı', 'Hizmete Özel', 'Gizli'] as const;
@@ -50,6 +53,7 @@ const uploadSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(40)).max(20).nullish(),
   companyId: z.string().uuid().nullish(),
   visitId: z.string().uuid().nullish(),
+  activityId: z.string().uuid().nullish(),
 });
 
 const listQuerySchema = z.object({
@@ -60,6 +64,7 @@ const listQuerySchema = z.object({
   classification: z.enum(CLASSIFICATIONS).optional(),
   companyId: z.string().uuid().optional(),
   visitId: z.string().uuid().optional(),
+  activityId: z.string().uuid().optional(),
   /** true → yalnızca kurumsal depo (ziyaret eki olmayanlar). */
   repositoryOnly: z.coerce.boolean().optional(),
 });
@@ -69,7 +74,7 @@ type ListQuery = z.infer<typeof listQuerySchema>;
 const listSelect = {
   id: true, title: true, fileName: true, mimeType: true, sizeBytes: true,
   category: true, description: true, classification: true, tags: true,
-  companyId: true, visitId: true, createdAt: true, updatedAt: true,
+  companyId: true, visitId: true, activityId: true, createdAt: true, updatedAt: true,
   company: { select: { id: true, name: true } },
   visit: { select: { id: true, visitCode: true, title: true } },
   uploadedBy: { select: { id: true, name: true, avatarUrl: true } },
@@ -94,7 +99,10 @@ router.get(
     if (query.classification) and.push({ classification: query.classification });
     if (query.companyId) and.push({ companyId: query.companyId });
     if (query.visitId) and.push({ visitId: query.visitId });
-    if (query.repositoryOnly) and.push({ visitId: null });
+    if (query.activityId) and.push({ activityId: query.activityId });
+    // Genel belge deposu: ziyarete veya etkinliğe ait ekler listelenmez,
+    // onlar kendi kayıtlarının içinde görünür.
+    if (query.repositoryOnly) and.push({ visitId: null, activityId: null });
     if (query.q) {
       and.push({
         OR: [
@@ -181,6 +189,12 @@ router.post(
       });
       if (!visit) throw NotFound('Ziyaret kaydı bulunamadı.');
     }
+    if (body.activityId) {
+      const activity = await prisma.businessActivity.findFirst({
+        where: { id: body.activityId, deletedAt: null }, select: { id: true },
+      });
+      if (!activity) throw NotFound('Aktivite bulunamadı.');
+    }
 
     const document = await prisma.documentFile.create({
       data: {
@@ -195,6 +209,7 @@ router.post(
         tags: (body.tags ?? undefined) as Prisma.InputJsonValue | undefined,
         companyId: body.companyId ?? null,
         visitId: body.visitId ?? null,
+        activityId: body.activityId ?? null,
         uploadedById: req.user!.id,
       },
       select: listSelect,
@@ -276,6 +291,7 @@ router.put(
         ...(body.classification !== undefined ? { classification: body.classification } : {}),
         ...(body.companyId !== undefined ? { companyId: body.companyId } : {}),
         ...(body.visitId !== undefined ? { visitId: body.visitId } : {}),
+        ...(body.activityId !== undefined ? { activityId: body.activityId } : {}),
         ...(body.tags !== undefined
           ? { tags: (body.tags ?? Prisma.DbNull) as Prisma.InputJsonValue }
           : {}),

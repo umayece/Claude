@@ -37,8 +37,29 @@ const phoneSchema = z.object({
  * uygulanır; şema `.and()` ile birleştirilseydi ortaya çıkan ZodIntersection
  * `.partial()` desteklemez ve kısmi güncelleme (PUT) şeması kurulamazdı.
  */
+const CONTACT_TYPES = [
+  'Kurum Çalışanı', 'Bağımsız Danışman', 'Aracı/Komisyoncu',
+  'Askeri Ataşe', 'Diğer',
+] as const;
+
 const contactFieldsSchema = z.object({
-  companyId: z.string().uuid(),
+  /**
+   * Şirket bağı ZORUNLU DEĞİL.
+   *
+   * Bağımsız danışman, aracı, komisyoncu ve askeri ataşe gibi kişilerin
+   * kurumu çoğu zaman sistemde yoktur; kişiyi kaydedebilmek için sahte
+   * bir şirket açmak zorunda kalmak veriyi bozar.
+   */
+  companyId: z.string().uuid().nullish(),
+  contactType: z.enum(CONTACT_TYPES).default('Kurum Çalışanı'),
+
+  // --- Bağımsız kişinin kendi adres/konum bilgisi ---
+  addressLine: z.string().trim().max(400).nullish(),
+  cityName: z.string().trim().max(120).nullish(),
+  country: z.string().trim().max(80).default('Türkiye'),
+  countryCode: z.string().trim().length(2).toUpperCase().default('TR'),
+  latitude: z.number().min(-90).max(90).nullish(),
+  longitude: z.number().min(-180).max(180).nullish(),
   firstName: z.string().trim().min(1, 'Ad zorunludur.').max(80),
   lastName: z.string().trim().min(1, 'Soyad zorunludur.').max(80),
   title: z.string().trim().max(120).nullish(),
@@ -107,6 +128,10 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(25),
   q: z.string().trim().max(200).optional(),
   companyId: z.string().uuid().optional(),
+  contactType: z.enum(CONTACT_TYPES).optional(),
+  countryCode: z.string().trim().length(2).toUpperCase().optional(),
+  /** Yalnızca bağımsız (kurumsuz) kişileri süz. */
+  standalone: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
   /** "1-12": doğum günü bu ayda olan kişiler. */
   birthMonth: z.coerce.number().int().min(1).max(12).optional(),
 });
@@ -174,9 +199,17 @@ router.get(
 
     const and: Prisma.ContactWhereInput[] = [
       { deletedAt: null },
-      { company: companyScope(req.user) },
+      // Bağımsız kişi (companyId = null) hiçbir departmana ait değildir;
+      // departman kapsamı ona uygulanamaz. `contact:read` yetkisi olan
+      // herkes görür. Kuruma bağlı kişiler eskisi gibi kapsamlanır.
+      { OR: [{ companyId: null }, { company: companyScope(req.user) }] },
     ];
     if (query.companyId) and.push({ companyId: query.companyId });
+    if (query.contactType) and.push({ contactType: query.contactType });
+    if (query.countryCode) and.push({ countryCode: query.countryCode });
+    // ?standalone=true → yalnızca kuruma bağlı OLMAYAN kişiler
+    if (query.standalone === true) and.push({ companyId: null });
+    if (query.standalone === false) and.push({ NOT: { companyId: null } });
     if (query.birthMonth) and.push({ birthMonth: query.birthMonth });
     if (query.q) {
       const digits = query.q.replace(/\D+/g, '');
@@ -187,6 +220,8 @@ router.get(
           { email: { contains: query.q, mode: 'insensitive' } },
           { title: { contains: query.q, mode: 'insensitive' } },
           { departmentName: { contains: query.q, mode: 'insensitive' } },
+          { cityName: { contains: query.q, mode: 'insensitive' } },
+          { country: { contains: query.q, mode: 'insensitive' } },
           // Kullanım dışı numaralar da eşleşir (isInactive filtresi YOK).
           ...(digits.length >= 3
             ? [{ phones: { some: { normalizedNumber: { contains: digits } } } }]
@@ -217,7 +252,11 @@ router.get(
   requirePermission('contact:read'),
   asyncHandler(async (req, res) => {
     const contact = await prisma.contact.findFirst({
-      where: { id: req.params.id, deletedAt: null, company: companyScope(req.user) },
+      where: {
+        id: req.params.id, deletedAt: null,
+        // Bağımsız kişi hiçbir departmana ait değildir; kapsam ona uygulanmaz.
+        OR: [{ companyId: null }, { company: companyScope(req.user) }],
+      },
       include: {
         ...contactInclude,
         deals: {
@@ -253,12 +292,20 @@ router.post(
   auditAction('CONTACT_CREATE', 'Contact'),
   asyncHandler(async (req, res) => {
     const body = req.body as ContactBody;
-    await assertCompanyAccess(req.user, body.companyId);
+    // Şirket verildiyse erişim doğrulanır; verilmediyse kişi bağımsızdır.
+    if (body.companyId) await assertCompanyAccess(req.user, body.companyId);
 
     const contact = await prisma.$transaction(async (tx) => {
       const created = await tx.contact.create({
         data: {
-          companyId: body.companyId,
+          companyId: body.companyId ?? null,
+          contactType: body.contactType,
+          addressLine: body.addressLine ?? null,
+          cityName: body.cityName ?? null,
+          country: body.country,
+          countryCode: body.countryCode,
+          latitude: body.latitude ?? null,
+          longitude: body.longitude ?? null,
           firstName: body.firstName,
           lastName: body.lastName,
           title: body.title ?? null,
@@ -300,7 +347,10 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = String(req.params.id);
     const existing = await prisma.contact.findFirst({
-      where: { id, deletedAt: null, company: companyScope(req.user) },
+      where: {
+        id, deletedAt: null,
+        OR: [{ companyId: null }, { company: companyScope(req.user) }],
+      },
       select: { id: true, companyId: true },
     });
     if (!existing) throw NotFound('Kişi bulunamadı.');
@@ -314,7 +364,14 @@ router.put(
       await tx.contact.update({
         where: { id },
         data: {
-          ...(body.companyId !== undefined ? { companyId: body.companyId } : {}),
+          ...(body.companyId !== undefined ? { companyId: body.companyId ?? null } : {}),
+          ...(body.contactType !== undefined ? { contactType: body.contactType } : {}),
+          ...(body.addressLine !== undefined ? { addressLine: body.addressLine } : {}),
+          ...(body.cityName !== undefined ? { cityName: body.cityName } : {}),
+          ...(body.country !== undefined ? { country: body.country } : {}),
+          ...(body.countryCode !== undefined ? { countryCode: body.countryCode } : {}),
+          ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
+          ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
           ...(body.firstName !== undefined ? { firstName: body.firstName } : {}),
           ...(body.lastName !== undefined ? { lastName: body.lastName } : {}),
           ...(body.title !== undefined ? { title: body.title } : {}),
@@ -348,7 +405,10 @@ router.delete(
   asyncHandler(async (req, res) => {
     const id = String(req.params.id);
     const existing = await prisma.contact.findFirst({
-      where: { id, deletedAt: null, company: companyScope(req.user) },
+      where: {
+        id, deletedAt: null,
+        OR: [{ companyId: null }, { company: companyScope(req.user) }],
+      },
       select: { id: true },
     });
     if (!existing) throw NotFound('Kişi bulunamadı.');
@@ -370,7 +430,10 @@ router.delete(
   asyncHandler(async (req, res) => {
     const id = String(req.params.id);
     const existing = await prisma.contact.findFirst({
-      where: { id, deletedAt: null, company: companyScope(req.user) },
+      where: {
+        id, deletedAt: null,
+        OR: [{ companyId: null }, { company: companyScope(req.user) }],
+      },
       select: { id: true, companyId: true, firstName: true, lastName: true },
     });
     if (!existing) throw NotFound('Kişi bulunamadı.');

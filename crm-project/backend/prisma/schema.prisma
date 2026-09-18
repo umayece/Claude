@@ -95,6 +95,8 @@ model User {
   visitRoles     VisitParticipant[]   @relation("VisitParticipantUser")
   checklistItems VisitChecklistItem[] @relation("ChecklistAssignee")
   documents      DocumentFile[]       @relation("DocumentUploader")
+  ownedActivities   BusinessActivity[]    @relation("ActivityOwner")
+  activityRoles     ActivityParticipant[] @relation("ActivityTeamMember")
   settings       SystemSetting[]      @relation("SettingEditor")
 
   @@index([departmentId])
@@ -232,6 +234,7 @@ model Company {
   notes      Note[]
   visits     ProtocolVisit[]
   documents  DocumentFile[]
+  businessActivities BusinessActivity[]
 
   @@index([deletedAt])
   @@index([name])
@@ -247,7 +250,11 @@ model Company {
 
 model Contact {
   id        String  @id @default(uuid())
-  companyId String
+  /// Şirket bağı ZORUNLU DEĞİLDİR. Bağımsız danışman, aracı, komisyoncu
+  /// veya askeri ataşe hiçbir kuruma bağlı olmadan kaydedilebilir.
+  companyId String?
+  /// Kurum Çalışanı, Bağımsız Danışman, Aracı/Komisyoncu, Askeri Ataşe, Diğer
+  contactType String @default("Kurum Çalışanı")
   firstName String
   lastName  String
   title     String?
@@ -266,12 +273,21 @@ model Contact {
   birthMonth Int?
   birthDay   Int?
 
+  // --- Bağımsız kişinin kendi adres/konum bilgisi ---
+  // Kuruma bağlı kişilerde bu alanlar boş bırakılır; adres kurumdan gelir.
+  addressLine String?
+  cityName    String?
+  country     String  @default("Türkiye")
+  countryCode String  @default("TR")
+  latitude    Float?
+  longitude   Float?
+
   isPrimary Boolean   @default(false)
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company?       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   phones  ContactPhone[]
 
   deals      Deal[]
@@ -283,11 +299,15 @@ model Contact {
   notes      Note[]
   visitRoles VisitParticipant[]
 
+  activityLinks ActivityContact[]
+
   @@index([companyId])
   @@index([deletedAt])
   @@index([lastName, firstName])
   @@index([email])
   @@index([birthMonth, birthDay])
+  @@index([countryCode])
+  @@index([contactType])
 }
 
 model ContactPhone {
@@ -322,7 +342,9 @@ model Deal {
 
   stage    String  @default("Potansiyel")
   amount   Float   @default(0)
-  currency String  @default("TRY")
+  /// Savunma sanayii satışlarının neredeyse tamamı dövizle yapılır;
+  /// varsayılan USD. TRY/EUR listeden seçilebilir.
+  currency String  @default("USD")
   /// Kayıt anındaki kur — YALNIZCA denetim/iz amaçlı saklanır.
   /// Fırsat değerlemesi listelerde ANLIK kurla yapılır (bkz. currency.service).
   /// `@map` ile mevcut sütun adı korunur: veri kaybı olmadan yeniden adlandırma.
@@ -348,6 +370,7 @@ model Deal {
   tasks      Task[]
   activities Activity[]
   notes      Note[]
+  businessActivities BusinessActivity[]
 
   @@index([companyId])
   @@index([deletedAt])
@@ -366,7 +389,7 @@ model Offer {
   dealId      String?
 
   status   String @default("Taslak")
-  currency String @default("TRY")
+  currency String @default("USD")
   /// Teklif resmiyet kazandığında (Gönderildi/Kabul) dondurulan kur.
   /// Taslak tekliflerde değerleme anlık kurla yapılır.
   exchangeRateAtCreation Float? @map("exchangeRate")
@@ -374,6 +397,13 @@ model Offer {
   subtotal  Float @default(0)
   taxTotal  Float @default(0)
   total     Float @default(0)
+
+  // --- Tahmini maliyet ve brüt marj ---
+  /// Kalemlerin maliyetlerinin toplamı (costCurrency cinsinden).
+  costTotal    Float  @default(0)
+  /// Maliyet para birimi satış para biriminden farklı olabilir:
+  /// hammadde USD alınıp teklif EUR verilebilir.
+  costCurrency String @default("USD")
 
   validUntil DateTime?
   notes      String?
@@ -405,6 +435,9 @@ model OfferItem {
   quantity    Float  @default(1)
   unit        String @default("Adet")
   unitPrice   Float  @default(0)
+  /// Birim başına tahmini maliyet (Offer.costCurrency cinsinden).
+  /// Kalem maliyeti = cost * quantity.
+  cost        Float  @default(0)
   taxRate     Float  @default(20.0)
   discountRate Float @default(0)
   lineTotal   Float  @default(0)
@@ -466,7 +499,7 @@ model Contract {
 
   status   String @default("Aktif")
   amount   Float  @default(0)
-  currency String @default("TRY")
+  currency String @default("USD")
   /// Sözleşme/imza tarihindeki kur. Detayda "İmza tarihindeki değeri" ile
   /// "güncel piyasa değeri" birlikte gösterilir.
   exchangeRateAtCreation Float? @map("exchangeRate")
@@ -476,6 +509,24 @@ model Contract {
   renewalDate  DateTime?
   description  String?
   terms        String?
+
+  // --- Termin (teslimat) takibi ---
+  /// Yürürlükteki termin tarihi. Yetkili revize edebilir; her revizyonda
+  /// deliveryRevisedAt güncellenir ve zaman tüneline kayıt düşer.
+  deliveryDate      DateTime?
+  /// İlk taahhüt edilen termin — gecikme ölçümü bu tarihe göre yapılır.
+  originalDeliveryDate DateTime?
+  deliveryRevisedAt DateTime?
+  deliveryNote      String?
+  /// Teslim edildi işaretlendiğinde dolar; hatırlatıcılar susar.
+  deliveredAt       DateTime?
+
+  // --- Gerçekleşen maliyet (COGS) ---
+  /// Satılan malın maliyeti. Teklifteki tahmini maliyetin aksine
+  /// sipariş kapandığında kesinleşen rakamdır.
+  cogs         Float?
+  cogsCurrency String  @default("USD")
+  cogsNote     String?
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -492,6 +543,7 @@ model Contract {
   @@index([status])
   @@index([endDate])
   @@index([renewalDate])
+  @@index([deliveryDate])
 }
 
 model PaymentMilestone {
@@ -530,7 +582,7 @@ model Product {
   description   String?
   category      String
   unitPrice     Float   @default(0)
-  currency      String  @default("TRY")
+  currency      String  @default("USD")
   taxRate       Float   @default(20.0)
   stockQuantity Int     @default(0)
   minStockLevel Int     @default(0)
@@ -949,8 +1001,9 @@ model DocumentFile {
   /// Serbest etiketler: ["Katar", "2026", "mühimmat"]
   tags        Json?
 
-  companyId String?
-  visitId   String?
+  companyId  String?
+  visitId    String?
+  activityId String?
   uploadedById String?
 
   deletedAt DateTime?
@@ -958,12 +1011,126 @@ model DocumentFile {
   updatedAt DateTime  @updatedAt
 
   company    Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  visit      ProtocolVisit? @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  uploadedBy User?          @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  visit      ProtocolVisit?    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  activity   BusinessActivity? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  uploadedBy User?             @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
 
   @@index([deletedAt])
   @@index([category])
   @@index([companyId])
   @@index([visitId])
+  @@index([activityId])
   @@index([createdAt])
+}
+
+// ===========================================================================
+// Aktivite havuzu — fuar, toplantı, saha ziyareti, fabrika gezisi
+// ---------------------------------------------------------------------------
+// Bu model, zaman tünelini besleyen `Activity` kaydından AYRIDIR.
+// `Activity` otomatik üretilen bir olay günlüğüdür (not eklendi, aşama
+// değişti...). `BusinessActivity` ise elle planlanan ve sonuçlandırılan
+// ticari bir etkinliktir; hiçbir kuruma, kişiye veya fırsata bağlı olmak
+// zorunda değildir. İkisini tek modelde birleştirmek zaman tünellerini
+// planlama kayıtlarıyla kirletirdi.
+// ===========================================================================
+
+model BusinessActivity {
+  id           String @id @default(uuid())
+  activityCode String @unique
+  title        String
+  /// TOPLANTI, FUAR, SAHA_ZIYARETI, FABRIKA_GEZISI, DIGER
+  type         String @default("TOPLANTI")
+  /// Planlandı, Devam Ediyor, Tamamlandı, İptal
+  status       String @default("Planlandı")
+
+  startDate DateTime
+  endDate   DateTime?
+
+  /// Fuar/etkinlik yeri: "IDEF 2026, İstanbul" veya "DSEI, Londra"
+  location    String?
+  venue       String?
+  country     String @default("Türkiye")
+  countryCode String @default("TR")
+
+  /// Planlama aşamasındaki amaç/hedef notu.
+  objective String?
+  /// Etkinlik sonrası genel değerlendirme.
+  summary   String?
+
+  // --- Fuar Sonuç Raporu ---
+  /// Rapor özet değerlendirme notu. Dosyanın kendisi DocumentFile olarak
+  /// bu aktiviteye yüklenir (kategori: FUAR_SONUC_RAPORU).
+  outcomeNote     String?
+  /// Rapor tamamlandığında dolar; "raporu bekleyen fuarlar" bu alanla bulunur.
+  outcomeReportAt DateTime?
+  /// Toplanan kartvizit adedi (elle girilir; sisteme işlenenler contacts'ta).
+  leadCount       Int     @default(0)
+
+  budgetAmount   Float?
+  budgetCurrency String @default("USD")
+
+  ownerId   String?
+  companyId String?
+  dealId    String?
+
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  owner     User?                 @relation("ActivityOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  company   Company?              @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  deal      Deal?                 @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  team      ActivityParticipant[]
+  contacts  ActivityContact[]
+  documents DocumentFile[]
+
+  @@index([deletedAt])
+  @@index([type, startDate])
+  @@index([status, startDate])
+  @@index([countryCode])
+  @@index([startDate])
+}
+
+/// Etkinliğe katılan MKE personeli.
+model ActivityParticipant {
+  id         String @id @default(uuid())
+  activityId String
+  userId     String?
+  /// Sistemde kullanıcısı olmayan katılımcı için serbest isim.
+  fullName   String
+  role       String?
+  /// Katılım durumu: katılamayacağını bildiren kişi listeden SİLİNMEZ,
+  /// üstü çizilir — kimin davet edildiği kaydın bir parçasıdır.
+  isAttending Boolean @default(true)
+  absenceReason String?
+  sortOrder  Int     @default(0)
+
+  activity BusinessActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  user     User?            @relation("ActivityTeamMember", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([activityId])
+}
+
+/// Fuarda görüşülen kişi / toplanan kartvizit.
+/// Kişi kaydı bağımsız olabilir (Contact.companyId null) — fuarda tanışılan
+/// bir ataşenin kurumu genellikle sistemde yoktur.
+model ActivityContact {
+  id         String @id @default(uuid())
+  activityId String
+  contactId  String
+
+  /// Görüşme notu: "155mm ile ilgilendi, numune talep etti"
+  note        String?
+  /// Sıcaklık: Sıcak, Ilık, Soğuk
+  interest    String  @default("Ilık")
+  /// Takip edildi mi?
+  followedUp  Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  activity BusinessActivity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  contact  Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, contactId])
+  @@index([activityId])
+  @@index([contactId])
 }

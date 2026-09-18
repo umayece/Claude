@@ -255,7 +255,9 @@ router.get(
         where: {
           AND: [
             { deletedAt: null },
-            { company: companyScope(req.user) },
+// Bağımsız kişi (companyId = null) hiçbir departmana ait değildir;
+            // kurum kapsamı ona uygulanamaz, yetkisi olan herkes görür.
+            { OR: [{ companyId: null }, { company: companyScope(req.user) }] },
             { birthMonth: { not: null } },
             { birthDay: { not: null } },
           ],
@@ -286,7 +288,8 @@ router.get(
             priority: null,
             status: null,
             companyId: contact.companyId,
-            companyName: contact.company.name,
+            // Bağımsız kişinin kurumu yoktur; takvimde kişi türü gösterilir.
+            companyName: contact.company?.name ?? 'Bağımsız kişi',
             contactId: contact.id,
             contactName: `${contact.firstName} ${contact.lastName}`,
             description: age !== null ? `${age}. yaş günü` : 'Doğum günü',

@@ -82,7 +82,10 @@ router.get(
               where: {
                 AND: [
                   { deletedAt: null },
-                  { company: scope },
+                  // Bağımsız kişiler de aranabilmeli: kuruma bağlı olmayan
+                  // ataşe/danışman kayıtları kapsam dışında kalırsa
+                  // genel arama onları hiç bulamaz.
+                  { OR: [{ companyId: null }, { company: scope }] },
                   {
                     OR: [
                       { firstName: insensitive },

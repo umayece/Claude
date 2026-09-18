@@ -32,6 +32,8 @@ import notesRoutes from './routes/notes.routes';
 import systemRoutes from './routes/system.routes';
 import protocolRoutes from './routes/protocol.routes';
 import documentsRoutes from './routes/documents.routes';
+import activitiesRoutes from './routes/activities.routes';
+import notificationsRoutes from './routes/notifications.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -109,6 +111,8 @@ export function createApp(): Express {
   api.use('/system', systemRoutes);
   api.use('/protocol-visits', protocolRoutes);
   api.use('/documents', documentsRoutes);
+  api.use('/activities', activitiesRoutes);
+  api.use('/notifications', notificationsRoutes);
 
   app.use('/api/v1', api);
 

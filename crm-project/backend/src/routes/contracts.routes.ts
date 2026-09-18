@@ -14,6 +14,12 @@ import {
   dualValue, getRateMap, shouldFreezeRate, SUPPORTED_CURRENCIES, type RateMap,
 } from '../services/currency.service';
 import { nextSequence } from '../services/sequence.service';
+import { deliveryInfo } from '../services/delivery.service';
+
+/** Zaman tüneli notu için kısa tarih; boşsa "—". */
+function formatDate(value: Date | null): string {
+  return value ? value.toLocaleDateString('tr-TR') : '—';
+}
 
 const router = Router();
 router.use(authenticate, requireMfaComplete);
@@ -29,12 +35,22 @@ const contractBodySchema = z.object({
   tenderId: z.string().uuid().nullish(),
   status: z.enum(CONTRACT_STATUSES).default('Aktif'),
   amount: z.number().min(0).max(1e15).default(0),
-  currency: z.enum(SUPPORTED_CURRENCIES).default('TRY'),
+  currency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
   startDate: z.coerce.date().nullish(),
   endDate: z.coerce.date().nullish(),
   renewalDate: z.coerce.date().nullish(),
   description: z.string().max(10_000).nullish(),
   terms: z.string().max(50_000).nullish(),
+
+  // --- Termin (teslimat) ---
+  deliveryDate: z.coerce.date().nullish(),
+  deliveryNote: z.string().max(2000).nullish(),
+  deliveredAt: z.coerce.date().nullish(),
+
+  // --- Gerçekleşen maliyet ---
+  cogs: z.number().min(0).max(1e15).nullish(),
+  cogsCurrency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
+  cogsNote: z.string().max(2000).nullish(),
 });
 
 const milestoneBodySchema = z.object({
@@ -136,6 +152,11 @@ router.get(
         rows.map((contract) => ({
           ...contract,
           ...dualValue(contract.amount, contract.currency, contract.exchangeRateAtCreation, rates),
+          delivery: deliveryInfo({
+            deliveryDate: contract.deliveryDate,
+            originalDeliveryDate: contract.originalDeliveryDate,
+            deliveredAt: contract.deliveredAt,
+          }),
         })),
         total,
         page,
@@ -153,7 +174,23 @@ router.get(
       where: { id: req.params.id, deletedAt: null, company: companyScope(req.user) },
       include: {
         ...contractInclude,
-        offer: { include: { items: { orderBy: { sortOrder: 'asc' } } } },
+        offer: {
+          include: {
+            items: {
+              orderBy: { sortOrder: 'asc' },
+              // Sipariş açıldığında ilgili ürünün ANLIK fabrika/depo stoğu
+              // görünmeli: taahhüt edilen adet stokta var mı?
+              include: {
+                product: {
+                  select: {
+                    id: true, sku: true, name: true, unit: true,
+                    stockQuantity: true, minStockLevel: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         milestones: { orderBy: [{ sortOrder: 'asc' }, { dueDate: 'asc' }] },
       },
     });
@@ -168,9 +205,35 @@ router.get(
       .filter((m) => m.effectiveStatus !== 'Tahsil Edildi')
       .reduce((sum, m) => sum + m.amountTry, 0);
 
+    // Sipariş kalemleri: taahhüt edilen adet ile depodaki adet yan yana.
+    const stockLines = (contract.offer?.items ?? [])
+      .filter((item) => item.product !== null)
+      .map((item) => {
+        const product = item.product!;
+        const shortage = Math.max(0, item.quantity - product.stockQuantity);
+        return {
+          productId: product.id,
+          sku: product.sku,
+          name: product.name,
+          unit: item.unit || product.unit,
+          orderedQuantity: item.quantity,
+          stockQuantity: product.stockQuantity,
+          minStockLevel: product.minStockLevel,
+          shortage,
+          // Üretim/tedarik gerekiyor mu?
+          isSufficient: shortage === 0,
+        };
+      });
+
     res.json({
       ...contract,
       milestones,
+      delivery: deliveryInfo({
+        deliveryDate: contract.deliveryDate,
+        originalDeliveryDate: contract.originalDeliveryDate,
+        deliveredAt: contract.deliveredAt,
+      }),
+      stockLines,
       // İmza tarihindeki değer ile güncel piyasa değeri birlikte döner.
       ...dualValue(contract.amount, contract.currency, contract.exchangeRateAtCreation, rates),
       milestoneSummary: {
@@ -212,6 +275,16 @@ router.post(
         renewalDate: body.renewalDate ?? null,
         description: body.description ?? null,
         terms: body.terms ?? null,
+        deliveryDate: body.deliveryDate ?? null,
+        // İlk taahhüt saklanır: gecikme ölçümü revize tarihe göre değil
+        // ORİJİNAL termine göre yapılmalı, aksi halde her revizyon
+        // gecikmeyi sıfırlar ve tedarik performansı ölçülemez hâle gelir.
+        originalDeliveryDate: body.deliveryDate ?? null,
+        deliveryNote: body.deliveryNote ?? null,
+        deliveredAt: body.deliveredAt ?? null,
+        cogs: body.cogs ?? null,
+        cogsCurrency: body.cogsCurrency,
+        cogsNote: body.cogsNote ?? null,
       },
       include: contractInclude,
     });
@@ -244,6 +317,11 @@ router.put(
       await assertCompanyAccess(req.user, body.companyId);
     }
 
+    // Termin gerçekten değişti mi? Aynı tarihin tekrar gönderilmesi
+    // revizyon sayılmaz, aksi halde her kayıtta sahte bir revizyon oluşur.
+    const deliveryChanged = body.deliveryDate !== undefined
+      && (existing.deliveryDate?.getTime() ?? null) !== (body.deliveryDate?.getTime() ?? null);
+
     // Sözleşme taslaktan çıktığında o anki kur imza kuru olarak dondurulur.
     const nextStatus = body.status ?? existing.status;
     const nextCurrency = body.currency ?? existing.currency;
@@ -268,9 +346,37 @@ router.put(
         ...(body.renewalDate !== undefined ? { renewalDate: body.renewalDate } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
         ...(body.terms !== undefined ? { terms: body.terms } : {}),
+        ...(body.deliveryDate !== undefined
+          ? {
+            deliveryDate: body.deliveryDate,
+            // İlk kez termin giriliyorsa aynı tarih orijinal taahhüt olur.
+            ...(existing.originalDeliveryDate === null
+              ? { originalDeliveryDate: body.deliveryDate }
+              : {}),
+            // Gerçekten değiştiyse revizyon damgası vurulur.
+            ...(deliveryChanged ? { deliveryRevisedAt: new Date() } : {}),
+          }
+          : {}),
+        ...(body.deliveryNote !== undefined ? { deliveryNote: body.deliveryNote } : {}),
+        ...(body.deliveredAt !== undefined ? { deliveredAt: body.deliveredAt } : {}),
+        ...(body.cogs !== undefined ? { cogs: body.cogs } : {}),
+        ...(body.cogsCurrency !== undefined ? { cogsCurrency: body.cogsCurrency } : {}),
+        ...(body.cogsNote !== undefined ? { cogsNote: body.cogsNote } : {}),
       },
       include: contractInclude,
     });
+
+    // Termin revizyonu zaman tüneline düşer: kimin ne zaman hangi tarihe
+    // çektiği kayıt altında olmalı.
+    if (deliveryChanged) {
+      await logActivity({
+        type: 'SYSTEM',
+        title: `Termin tarihi revize edildi: ${contract.contractNumber}`,
+        body: `${formatDate(existing.deliveryDate)} → ${formatDate(contract.deliveryDate)}`
+          + (body.deliveryNote ? ` — ${body.deliveryNote}` : ''),
+        companyId: contract.companyId, contractId: contract.id, userId: req.user!.id,
+      });
+    }
 
     res.json(contract);
   }),

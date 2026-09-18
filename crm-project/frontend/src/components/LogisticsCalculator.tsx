@@ -57,6 +57,71 @@ function emptyRow(index: number): Row {
   };
 }
 
+/**
+ * Mühimmat ambalaj ön tanımları.
+ *
+ * DİKKAT: Bu değerler YAKLAŞIKTIR ve NATO standart ambalajları için tipik
+ * büyüklükleri temsil eder. Gerçek sevkiyatta üreticinin teknik veri
+ * sayfasındaki sandık ölçüsü ve brüt ağırlık esas alınmalıdır — ambalaj
+ * lot, fitil ve paketleme tipine göre değişir. Ön tanım seçildikten sonra
+ * tüm alanlar elle düzeltilebilir; hesap düzeltilmiş değerlerle yapılır.
+ */
+interface AmmoPreset {
+  key: string;
+  label: string;
+  /** Bir sandıktaki fişek/mermi adedi */
+  roundsPerCase: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+  /** Dolu sandığın brüt ağırlığı (kg) */
+  grossWeightKg: number;
+  hazardClass: string;
+}
+
+const AMMO_PRESETS: AmmoPreset[] = [
+  {
+    key: '9x19', label: '9x19 mm Tabanca',
+    roundsPerCase: 2000, lengthCm: 40, widthCm: 30, heightCm: 24,
+    grossWeightKg: 28, hazardClass: '1.4S',
+  },
+  {
+    key: '5.56x45', label: '5.56x45 mm NATO',
+    roundsPerCase: 1600, lengthCm: 45, widthCm: 35, heightCm: 20,
+    grossWeightKg: 30, hazardClass: '1.4S',
+  },
+  {
+    key: '7.62x51', label: '7.62x51 mm NATO',
+    roundsPerCase: 800, lengthCm: 45, widthCm: 35, heightCm: 20,
+    grossWeightKg: 30, hazardClass: '1.4S',
+  },
+  {
+    key: '12.7x99', label: '12.7x99 mm (.50 BMG)',
+    roundsPerCase: 200, lengthCm: 60, widthCm: 36, heightCm: 26,
+    grossWeightKg: 35, hazardClass: '1.4S',
+  },
+  {
+    key: '40mm', label: '40 mm Bombaatar',
+    roundsPerCase: 48, lengthCm: 50, widthCm: 38, heightCm: 30,
+    grossWeightKg: 32, hazardClass: '1.2E',
+  },
+  {
+    key: '81mm', label: '81 mm Havan',
+    roundsPerCase: 6, lengthCm: 92, widthCm: 32, heightCm: 26,
+    grossWeightKg: 42, hazardClass: '1.1D',
+  },
+  {
+    key: '120mm', label: '120 mm Havan',
+    roundsPerCase: 2, lengthCm: 110, widthCm: 34, heightCm: 30,
+    grossWeightKg: 46, hazardClass: '1.1D',
+  },
+  {
+    key: '155mm', label: '155 mm Obüs',
+    roundsPerCase: 2, lengthCm: 120, widthCm: 60, heightCm: 40,
+    grossWeightKg: 110, hazardClass: '1.1D',
+  },
+];
+
 export function LogisticsCalculator() {
   const [products, setProducts] = useState<Product[]>([]);
   const [rows, setRows] = useState<Row[]>([emptyRow(0)]);
@@ -110,6 +175,22 @@ export function LogisticsCalculator() {
       caseHeightCm: product.caseHeightCm ? String(product.caseHeightCm) : '25',
       caseWeightKg: product.caseWeightKg ? String(product.caseWeightKg) : '20',
       hazardClass: product.hazardClass ?? null,
+    });
+  };
+
+  /** Mühimmat ön tanımını satıra uygular; ürün seçimi sıfırlanır. */
+  const applyPreset = (key: string, presetKey: string): void => {
+    const preset = AMMO_PRESETS.find((item) => item.key === presetKey);
+    if (!preset) return;
+    update(key, {
+      productId: null,
+      name: preset.label,
+      caseQuantity: String(preset.roundsPerCase),
+      caseLengthCm: String(preset.lengthCm),
+      caseWidthCm: String(preset.widthCm),
+      caseHeightCm: String(preset.heightCm),
+      caseWeightKg: String(preset.grossWeightKg),
+      hazardClass: preset.hazardClass,
     });
   };
 
@@ -218,6 +299,36 @@ export function LogisticsCalculator() {
           className="card"
           style={{ padding: 12, marginBottom: 10, background: 'var(--surface-alt)' }}
         >
+          {/*
+            Mühimmat tipi ön tanımı.
+
+            Kullanıcı kalibre seçip sipariş adedini girdiğinde sandık
+            adedi, brüt ağırlık ve hacim otomatik çıkar. Değerler
+            yaklaşıktır; teknik veri sayfasına göre düzeltilebilir.
+          */}
+          <div className="field" style={{ marginBottom: 10 }}>
+            <label className="field-label">Mühimmat Tipi (hızlı seçim)</label>
+            <select
+              className="select"
+              value=""
+              onChange={(event) => {
+                if (event.target.value) applyPreset(row.key, event.target.value);
+              }}
+              aria-label="Mühimmat tipi ön tanımı"
+            >
+              <option value="">Kalibre seçin (alanları doldurur)…</option>
+              {AMMO_PRESETS.map((preset) => (
+                <option key={preset.key} value={preset.key}>
+                  {preset.label} — {preset.roundsPerCase} adet/sandık, {preset.grossWeightKg} kg
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-muted">
+              Değerler NATO standart ambalajı için yaklaşıktır; teknik veri
+              sayfasına göre aşağıdan düzeltebilirsiniz.
+            </span>
+          </div>
+
           <div className="grid grid-2" style={{ gap: 0, columnGap: 12 }}>
             <div className="field" style={{ marginBottom: 10 }}>
               <label className="field-label">Ürün (katalogdan)</label>

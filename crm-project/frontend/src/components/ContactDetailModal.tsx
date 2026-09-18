@@ -5,9 +5,11 @@ import { useAuth } from '../hooks/useAuth';
 import { Modal } from './Modal';
 import { Avatar } from './Avatar';
 import {
-  IconAlert, IconGift, IconPhone, IconPlus, IconTrash, IconUpload, IconX,
+  IconAlert, IconGift, IconMap, IconPhone, IconPlus, IconTrash, IconUpload, IconX,
 } from './Icons';
-import type { Contact, ContactPhone, PhoneLabel } from '../types';
+import { SearchableSelect, type SelectOption } from './SearchableSelect';
+import { CONTACT_TYPES } from '../types';
+import type { Contact, ContactPhone, ContactType, PhoneLabel } from '../types';
 
 const PHONE_LABELS: PhoneLabel[] = ['İş', 'Cep', 'Sabit', 'Dahili', 'Faks'];
 const MONTHS = [
@@ -66,6 +68,17 @@ export function ContactDetailModal({ open, contactId, companyId, onClose, onSave
   const [notes, setNotes] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
+  // Kişi türü ve bağımsız kişinin kendi konum bilgisi.
+  const [contactType, setContactType] = useState<ContactType>('Kurum Çalışanı');
+  const [linkedCompanyId, setLinkedCompanyId] = useState<string | null>(null);
+  const [addressLine, setAddressLine] = useState('');
+  const [cityName, setCityName] = useState('');
+  const [country, setCountry] = useState('Türkiye');
+  const [countryCode, setCountryCode] = useState('TR');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [companyOptions, setCompanyOptions] = useState<SelectOption[]>([]);
+
   const [birthYear, setBirthYear] = useState('');
   const [birthMonth, setBirthMonth] = useState('');
   const [birthDay, setBirthDay] = useState('');
@@ -84,6 +97,15 @@ export function ContactDetailModal({ open, contactId, companyId, onClose, onSave
     setSector(data?.sector ?? '');
     setNotes(data?.notes ?? '');
     setAvatarUrl(data?.avatarUrl ?? null);
+    setContactType(data?.contactType ?? 'Kurum Çalışanı');
+    // Yeni kayıtta üst ekrandan gelen kurum ön seçili gelir; yoksa boş.
+    setLinkedCompanyId(data ? data.companyId : companyId ?? null);
+    setAddressLine(data?.addressLine ?? '');
+    setCityName(data?.cityName ?? '');
+    setCountry(data?.country ?? 'Türkiye');
+    setCountryCode(data?.countryCode ?? 'TR');
+    setLatitude(data?.latitude != null ? String(data.latitude) : '');
+    setLongitude(data?.longitude != null ? String(data.longitude) : '');
     setBirthYear(data?.birthYear ? String(data.birthYear) : '');
     setBirthMonth(data?.birthMonth ? String(data.birthMonth) : '');
     setBirthDay(data?.birthDay ? String(data.birthDay) : '');
@@ -98,7 +120,26 @@ export function ContactDetailModal({ open, contactId, companyId, onClose, onSave
         inactiveReason: phone.inactiveReason,
       })),
     );
-  }, []);
+  }, [companyId]);
+
+  // Kurum listesi: kişi isteğe bağlı olarak bir kuruma bağlanabilir.
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await api.get<{ data: { id: string; name: string }[] }>(
+          '/companies', { pageSize: 200, sort: 'name' }, controller.signal,
+        );
+        setCompanyOptions(
+          response.data.map((row) => ({ value: row.id, label: row.name })),
+        );
+      } catch {
+        // Kurum listesi alınamazsa alan boş kalır; kişi bağımsız kaydedilir.
+      }
+    })();
+    return () => controller.abort();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -201,17 +242,20 @@ export function ContactDetailModal({ open, contactId, companyId, onClose, onSave
       return;
     }
 
-    const targetCompanyId = contact?.companyId ?? companyId;
-    if (!targetCompanyId) {
-      setError('Kişi bir şirkete bağlı olmalıdır.');
-      return;
-    }
-
     setSaving(true);
     setError(null);
     try {
       const payload = {
-        companyId: targetCompanyId,
+        // Kurum ZORUNLU DEĞİL: bağımsız danışman, aracı, komisyoncu ve
+        // askeri ataşe hiçbir kuruma bağlı olmadan kaydedilebilir.
+        companyId: linkedCompanyId,
+        contactType,
+        addressLine: addressLine || null,
+        cityName: cityName || null,
+        country: country.trim() || 'Türkiye',
+        countryCode: (countryCode.trim() || 'TR').toUpperCase(),
+        latitude: latitude ? Number(latitude) : null,
+        longitude: longitude ? Number(longitude) : null,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         title: title || null,
@@ -344,6 +388,100 @@ export function ContactDetailModal({ open, contactId, companyId, onClose, onSave
                   <span className="text-xs text-muted">En fazla 400 KB · JPG/PNG</span>
                 </div>
               </div>
+
+              {/*
+                Kişi türü ve kurum bağı.
+
+                Kurum alanı BOŞ BIRAKILABİLİR: fuarda tanışılan bir askeri
+                ataşenin veya bağımsız bir aracının kurumu genellikle
+                sistemde yoktur. Sırf kişiyi kaydedebilmek için sahte
+                şirket açmak veriyi bozar.
+              */}
+              <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>
+                <div className="field">
+                  <label className="field-label" htmlFor="ct-type">Kişi Türü</label>
+                  <select
+                    id="ct-type" className="select" value={contactType}
+                    onChange={(event) => setContactType(event.target.value as ContactType)}
+                  >
+                    {CONTACT_TYPES.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label className="field-label">Bağlı Kurum <span className="text-faint">(isteğe bağlı)</span></label>
+                  <SearchableSelect
+                    options={companyOptions}
+                    value={linkedCompanyId}
+                    onChange={setLinkedCompanyId}
+                    placeholder="Kurum seçin veya boş bırakın"
+                    clearable
+                  />
+                </div>
+              </div>
+
+              {linkedCompanyId === null && (
+                <>
+                  <h3 className="mb-2 mt-3">
+                    <IconMap size={14} /> Bağımsız Kişi Adresi
+                  </h3>
+                  <p className="text-xs text-muted mb-2">
+                    Kuruma bağlı olmayan kişinin kendi adres ve konum bilgisi.
+                    Koordinat girilirse kişi haritada da görünebilir.
+                  </p>
+
+                  <div className="field">
+                    <label className="field-label" htmlFor="ct-addr">Adres</label>
+                    <textarea
+                      id="ct-addr" className="textarea" rows={2} value={addressLine}
+                      onChange={(event) => setAddressLine(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>
+                    <div className="field">
+                      <label className="field-label" htmlFor="ct-city">Şehir</label>
+                      <input
+                        id="ct-city" className="input" value={cityName}
+                        onChange={(event) => setCityName(event.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="field-label" htmlFor="ct-country">Ülke</label>
+                      <input
+                        id="ct-country" className="input" value={country}
+                        onChange={(event) => setCountry(event.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="field-label" htmlFor="ct-cc">Ülke Kodu</label>
+                      <input
+                        id="ct-cc" className="input mono" maxLength={2} value={countryCode}
+                        onChange={(event) => setCountryCode(event.target.value.toUpperCase())}
+                        placeholder="TR"
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="field-label" htmlFor="ct-lat">Enlem / Boylam</label>
+                      <div className="flex gap-2">
+                        <input
+                          id="ct-lat" className="input mono" value={latitude}
+                          onChange={(event) => setLatitude(event.target.value)}
+                          placeholder="39.93"
+                        />
+                        <input
+                          className="input mono" value={longitude}
+                          onChange={(event) => setLongitude(event.target.value)}
+                          placeholder="32.85"
+                          aria-label="Boylam"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>
                 <div className="field">

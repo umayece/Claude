@@ -26,7 +26,8 @@ export const LOSS_REASONS = [
   'Rakip Tercihi', 'İhale İptali',
 ] as const;
 
-const CURRENCIES: CurrencyCode[] = ['TRY', 'USD', 'EUR', 'GBP'];
+// USD ilk sırada: savunma sanayii satışları ağırlıklı dövizlidir.
+const CURRENCIES: CurrencyCode[] = ['USD', 'TRY', 'EUR', 'GBP'];
 
 /** Skoru renkli rozet olarak gösterir. */
 export function ScoreBadge({ score }: { score: number | null }) {
@@ -52,7 +53,7 @@ interface FormState {
 
 const EMPTY: FormState = {
   title: '', companyId: null, stage: 'Potansiyel', amount: '0',
-  currency: 'TRY', expectedCloseDate: '', description: '',
+  currency: 'USD', expectedCloseDate: '', description: '',
   lossReason: '', lossDetail: '',
 };
 

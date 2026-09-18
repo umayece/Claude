@@ -9,6 +9,7 @@ import { Pagination } from '../components/Pagination';
 import { ContactDetailModal } from '../components/ContactDetailModal';
 import { IconEdit, IconGift, IconPlus, IconSearch, IconTrash, IconUsers } from '../components/Icons';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
+import { CONTACT_TYPES } from '../types';
 import type { Contact, Paginated } from '../types';
 
 const MONTHS = [
@@ -33,6 +34,9 @@ export function Contacts() {
 
   const [term, setTerm] = useState('');
   const [birthMonthFilter, setBirthMonthFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  /** '' tümü · 'true' yalnızca bağımsız · 'false' yalnızca kuruma bağlı */
+  const [standaloneFilter, setStandaloneFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useLocalStorage('crm:contacts:pageSize', 25);
 
@@ -56,6 +60,8 @@ export function Contacts() {
           page, pageSize,
           q: debouncedTerm || undefined,
           companyId: companyIdFilter ?? undefined,
+          contactType: typeFilter || undefined,
+          standalone: standaloneFilter || undefined,
           birthMonth: birthMonthFilter || undefined,
         },
         signal,
@@ -67,7 +73,7 @@ export function Contacts() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, companyIdFilter, birthMonthFilter]);
+  }, [page, pageSize, debouncedTerm, companyIdFilter, birthMonthFilter, typeFilter, standaloneFilter]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -110,8 +116,19 @@ export function Contacts() {
       <div className="page-header">
         <div className="page-header-text">
           <h1>Kişiler</h1>
-          <p>Çoklu telefon, esnek doğum günü ve ilişkili fırsat yönetimi.</p>
+          <p>
+            Kurum çalışanları ve bağımsız kişiler (danışman, aracı, komisyoncu,
+            askeri ataşe) tek listede.
+          </p>
         </div>
+        {can('contact:write') && (
+          <button
+            type="button" className="btn btn-primary"
+            onClick={() => { setEditingId(null); setModalOpen(true); }}
+          >
+            <IconPlus size={15} /> Yeni Kişi
+          </button>
+        )}
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -145,6 +162,29 @@ export function Contacts() {
               <option key={name} value={index + 1}>{name} doğumlular</option>
             ))}
           </select>
+
+          <select
+            className="select" style={{ width: 'auto' }}
+            value={typeFilter}
+            onChange={(event) => { setTypeFilter(event.target.value); setPage(1); }}
+            aria-label="Kişi türü filtresi"
+          >
+            <option value="">Tüm kişi türleri</option>
+            {CONTACT_TYPES.map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+
+          <select
+            className="select" style={{ width: 'auto' }}
+            value={standaloneFilter}
+            onChange={(event) => { setStandaloneFilter(event.target.value); setPage(1); }}
+            aria-label="Kurum bağı filtresi"
+          >
+            <option value="">Kuruma bağlı + bağımsız</option>
+            <option value="false">Yalnızca kuruma bağlı</option>
+            <option value="true">Yalnızca bağımsız</option>
+          </select>
         </div>
 
         {loading && !result && (
@@ -155,7 +195,10 @@ export function Contacts() {
           <div className="empty-state">
             <IconUsers size={42} />
             <h3>Kişi bulunamadı</h3>
-            <p>Kişiler bir kuruma bağlı olarak eklenir. Kurum sayfasından yeni kişi ekleyebilirsiniz.</p>
+            <p>
+              Kişiler bir kuruma bağlı olabilir ya da bağımsız (danışman, aracı,
+              askeri ataşe) olarak eklenebilir.
+            </p>
           </div>
         )}
 
@@ -166,8 +209,9 @@ export function Contacts() {
                 <thead>
                   <tr>
                     <th>Kişi</th>
+                    <th>Tür</th>
                     <th>Kurum</th>
-                    <th>Departman</th>
+                    <th>Konum</th>
                     <th>Telefonlar</th>
                     <th>Doğum Günü</th>
                     <th className="col-actions">İşlem</th>
@@ -197,8 +241,26 @@ export function Contacts() {
                         </div>
                       </td>
 
-                      <td className="text-sm">{contact.company?.name ?? '—'}</td>
-                      <td className="text-sm">{contact.departmentName ?? '—'}</td>
+                      <td className="text-sm nowrap">
+                        <span className={`badge ${contact.companyId ? 'badge-info' : 'badge-warning'}`}>
+                          {contact.contactType}
+                        </span>
+                      </td>
+
+                      <td className="text-sm">
+                        {contact.company?.name ?? (
+                          <span className="text-faint" title="Bu kişi bağımsızdır">Bağımsız</span>
+                        )}
+                        {contact.departmentName && (
+                          <div className="text-xs text-muted">{contact.departmentName}</div>
+                        )}
+                      </td>
+
+                      <td className="text-sm">
+                        {contact.cityName || contact.country !== 'Türkiye'
+                          ? `${contact.cityName ?? ''}${contact.cityName ? ', ' : ''}${contact.country}`
+                          : <span className="text-faint">—</span>}
+                      </td>
 
                       <td>
                         {contact.phones.length === 0 && <span className="text-faint">—</span>}
@@ -277,13 +339,11 @@ export function Contacts() {
         onSaved={() => void load()}
       />
 
-      {can('contact:write') && companyIdFilter && (
-        <button
-          type="button" className="btn btn-primary mt-3"
-          onClick={() => { setEditingId(null); setModalOpen(true); }}
-        >
-          <IconPlus size={15} /> Bu Kuruma Kişi Ekle
-        </button>
+      {companyIdFilter && (
+        <p className="text-xs text-muted mt-2">
+          Bu liste tek bir kuruma göre süzülmüştür. Yeni kişi eklerken kurum alanı
+          ön seçili gelir; boşaltırsanız kişi bağımsız olarak kaydedilir.
+        </p>
       )}
     </>
   );
