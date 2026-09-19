@@ -7,14 +7,18 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
 import {
-  IconAlert, IconDownload, IconFile, IconPlus, IconSearch, IconTrash, IconUpload,
+  IconAlert, IconCheck, IconDownload, IconEdit, IconFile, IconPlus, IconSearch,
+  IconTrash, IconUpload,
 } from '../components/Icons';
 import type { DocumentFile, Paginated } from '../types';
 
 const CATEGORIES = [
   'PAZAR_ANALIZI', 'ULKE_BRIFINGI', 'DIPLOMATIK_NOTA', 'PASAPORT_LISTESI',
   'SUNUM', 'SOZLESME_ORNEGI', 'TEKNIK_DOKUMAN',
-  'FUAR_SONUC_RAPORU', 'ETKINLIK_BELGESI', 'DIGER',
+  'FUAR_SONUC_RAPORU', 'ETKINLIK_BELGESI',
+  'STRATEJIK_PAZARLAMA', 'PAZAR_ARASTIRMASI', 'HEYET_RAPORU', 'KURUMSAL_BELGE',
+  'EUC', 'IHRACAT_LISANSI',
+  'DIGER',
 ] as const;
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -27,6 +31,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   TEKNIK_DOKUMAN: 'Teknik Doküman',
   FUAR_SONUC_RAPORU: 'Fuar Sonuç Raporu',
   ETKINLIK_BELGESI: 'Etkinlik Belgesi',
+  STRATEJIK_PAZARLAMA: 'Stratejik Pazarlama Raporu',
+  PAZAR_ARASTIRMASI: 'Pazar Araştırması',
+  HEYET_RAPORU: 'Heyet / Organizasyon Raporu',
+  KURUMSAL_BELGE: 'Genel Kurumsal Belge',
+  EUC: 'Son Kullanıcı Belgesi (EUC)',
+  IHRACAT_LISANSI: 'İhracat Lisansı / İzin Belgesi',
   DIGER: 'Diğer',
 };
 
@@ -83,6 +93,55 @@ export function Documents() {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  /**
+   * Belge üst verisi düzenleme.
+   *
+   * Dosyanın KENDİSİ değişmez — yalnızca başlık, kategori, sınıflandırma ve
+   * açıklama güncellenir. İçeriği değiştirmek yeni bir belge yüklemektir;
+   * aynı kaydın üzerine yazmak denetim izini bozardı.
+   */
+  const [editing, setEditing] = useState<DocumentFile | null>(null);
+  const [editForm, setEditForm] = useState({
+    title: '', category: 'DIGER', classification: 'Hizmete Özel', description: '',
+  });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const startEdit = (document: DocumentFile): void => {
+    setEditing(document);
+    setEditForm({
+      title: document.title,
+      category: document.category,
+      classification: document.classification,
+      description: document.description ?? '',
+    });
+    setEditError(null);
+  };
+
+  const saveEdit = async (): Promise<void> => {
+    if (!editing) return;
+    if (!editForm.title.trim()) {
+      setEditError('Başlık zorunludur.');
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await api.put(`/documents/${editing.id}`, {
+        title: editForm.title.trim(),
+        category: editForm.category,
+        classification: editForm.classification,
+        description: editForm.description || null,
+      });
+      setEditing(null);
+      await load();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Belge güncellenemedi.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const debouncedTerm = useDebounce(term, 350);
   const visitId = searchParams.get('visitId');
@@ -347,6 +406,17 @@ export function Documents() {
                         İndir
                       </button>
 
+                      {can('document:write') && (
+                        <button
+                          type="button" className="btn btn-sm btn-ghost"
+                          aria-label="Belgeyi düzenle"
+                          title="Başlık, kategori ve açıklamayı düzenle"
+                          onClick={() => startEdit(document)}
+                        >
+                          <IconEdit size={13} />
+                        </button>
+                      )}
+
                       {can('document:delete') && (
                         <button
                           type="button" className="btn btn-sm btn-ghost"
@@ -479,6 +549,85 @@ export function Documents() {
           <textarea
             id="doc-desc" className="textarea" rows={3} value={form.description}
             onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
+          />
+        </div>
+      </Modal>
+
+      {/* --- Belge üst verisi düzenleme --- */}
+      <Modal
+        open={editing !== null}
+        title="Belgeyi Düzenle"
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setEditing(null)}>
+              Vazgeç
+            </button>
+            <button
+              type="button" className="btn btn-primary"
+              onClick={() => void saveEdit()} disabled={editSaving}
+            >
+              {editSaving ? <span className="spinner" /> : <IconCheck size={15} />} Kaydet
+            </button>
+          </>
+        }
+      >
+        {editError && <div className="alert alert-danger">{editError}</div>}
+
+        {editing && (
+          <div className="alert alert-info">
+            Dosyanın kendisi değişmez: <strong>{editing.fileName}</strong>. Yalnızca
+            başlık, kategori, gizlilik derecesi ve açıklama güncellenir.
+          </div>
+        )}
+
+        <div className="field">
+          <label className="field-label" htmlFor="ed-title">Başlık<span className="req">*</span></label>
+          <input
+            id="ed-title" className="input" value={editForm.title}
+            onChange={(event) => setEditForm((prev) => ({ ...prev, title: event.target.value }))}
+          />
+        </div>
+
+        <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ed-cat">Kategori</label>
+            <select
+              id="ed-cat" className="select" value={editForm.category}
+              onChange={(event) => setEditForm((prev) => ({
+                ...prev, category: event.target.value,
+              }))}
+            >
+              {CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {CATEGORY_LABELS[category] ?? category}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="ed-cls">Gizlilik Derecesi</label>
+            <select
+              id="ed-cls" className="select" value={editForm.classification}
+              onChange={(event) => setEditForm((prev) => ({
+                ...prev, classification: event.target.value,
+              }))}
+            >
+              {CLASSIFICATIONS.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label className="field-label" htmlFor="ed-desc">Açıklama</label>
+          <textarea
+            id="ed-desc" className="textarea" rows={3} value={editForm.description}
+            onChange={(event) => setEditForm((prev) => ({
+              ...prev, description: event.target.value,
+            }))}
           />
         </div>
       </Modal>

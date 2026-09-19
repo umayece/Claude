@@ -77,6 +77,7 @@ const listInclude = {
   owner: { select: { id: true, name: true } },
   department: { select: { id: true, name: true } },
   _count: { select: { contacts: true, deals: true, tenders: true, contracts: true, tickets: true } },
+  tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
 } satisfies Prisma.CompanyInclude;
 
 type CompanyWithRelations = Prisma.CompanyGetPayload<{ include: typeof listInclude }>;

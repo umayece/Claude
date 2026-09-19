@@ -12,13 +12,17 @@ import { WhatsAppModal } from '../components/WhatsAppModal';
 import { Modal } from '../components/Modal';
 import { Avatar } from '../components/Avatar';
 import { COMPANY_STAGES, typeBadgeClass } from './Companies';
+import { useDeleteConfirm } from '../components/ConfirmDialog';
 import {
-  IconCalendar, IconGavel, IconMail, IconNote, IconPhone,
-  IconSparkles, IconTrending, IconWhatsapp, IconWrench,
+  IconCalendar, IconCheck, IconEdit, IconGavel, IconMail, IconNote, IconPhone,
+  IconSparkles, IconTrash, IconTrending, IconWhatsapp, IconWrench, IconX,
 } from '../components/Icons';
-import type { Activity, Company, Paginated } from '../types';
+import type { Activity, Company, Note, Paginated } from '../types';
 
-type TabKey = 'activity' | 'email' | 'whatsapp' | 'task' | 'ticket' | 'ai';
+type TabKey = 'activity' | 'notes' | 'email' | 'whatsapp' | 'task' | 'ticket' | 'ai';
+
+/** Yapışkan not renkleri — "Notlarım" panosuyla aynı palet. */
+const NOTE_COLORS = ['#fef3c7', '#dcfce7', '#dbeafe', '#fce7f3', '#ede9fe', '#f1f5f9'];
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -45,6 +49,14 @@ export function CompanyDetail() {
   const [activityPage, setActivityPage] = useState(1);
   const [activityTotal, setActivityTotal] = useState(0);
   const [tab, setTab] = useState<TabKey>('activity');
+
+  // Kuruma ait notlar: listeleme, ekleme, düzenleme, silme tek yerde.
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState({ title: '', body: '', color: NOTE_COLORS[0]! });
+  const [noteSaving, setNoteSaving] = useState(false);
+  const confirmDelete = useDeleteConfirm();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +133,73 @@ export function CompanyDetail() {
     }
   };
 
+  const loadNotes = useCallback(async () => {
+    if (!id) return;
+    setNotesLoading(true);
+    try {
+      const response = await api.get<{ data: Note[] }>(`/notes/company/${id}`);
+      setNotes(response.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Notlar alınamadı.');
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [id]);
+
+  // Notlar sekmesi ilk açıldığında yüklenir; sürekli çekmeye gerek yok.
+  useEffect(() => {
+    if (tab === 'notes') void loadNotes();
+  }, [tab, loadNotes]);
+
+  const startEditNote = (note: Note): void => {
+    setEditingNoteId(note.id);
+    setNoteDraft({
+      title: note.title ?? '',
+      body: note.body,
+      color: note.color || NOTE_COLORS[0]!,
+    });
+  };
+
+  const cancelEditNote = (): void => {
+    setEditingNoteId(null);
+    setNoteDraft({ title: '', body: '', color: NOTE_COLORS[0]! });
+  };
+
+  /** Yeni not oluşturur ya da düzenlenen notu günceller. */
+  const saveNote = async (): Promise<void> => {
+    if (!id || !noteDraft.body.trim()) return;
+    setNoteSaving(true);
+    try {
+      const payload = {
+        companyId: id,
+        title: noteDraft.title.trim() || 'Not',
+        body: noteDraft.body.trim(),
+        color: noteDraft.color,
+      };
+      if (editingNoteId) await api.put(`/notes/${editingNoteId}`, payload);
+      else await api.post('/notes', payload);
+
+      cancelEditNote();
+      await loadNotes();
+      // Yeni not zaman tüneline de düşer; akış tazelenir.
+      if (!editingNoteId) await loadTimeline(1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Not kaydedilemedi.');
+    } finally {
+      setNoteSaving(false);
+    }
+  };
+
+  const removeNote = async (note: Note): Promise<void> => {
+    if (!(await confirmDelete(note.title || 'Not', 'Not çöp kutusuna taşınır.'))) return;
+    try {
+      await api.delete(`/notes/${note.id}`);
+      await loadNotes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Not silinemedi.');
+    }
+  };
+
   const primaryContact = useMemo(
     () => company?.contacts?.find((contact) => contact.isPrimary) ?? company?.contacts?.[0] ?? null,
     [company],
@@ -133,6 +212,7 @@ export function CompanyDetail() {
 
   const tabs: DrawerTab[] = [
     { key: 'activity', label: 'Aktivite Akışı', icon: <IconTrending size={14} />, badge: activityTotal },
+    { key: 'notes', label: 'Notlar', icon: <IconNote size={14} />, badge: notes.length || undefined },
     { key: 'email', label: 'E-Posta Gönder', icon: <IconMail size={14} /> },
     { key: 'whatsapp', label: 'WhatsApp', icon: <IconWhatsapp size={14} /> },
     { key: 'task', label: 'Görev Ekle', icon: <IconCalendar size={14} /> },
@@ -349,6 +429,127 @@ export function CompanyDetail() {
                 Daha fazla göster ({activityTotal - activities.length} kayıt)
               </button>
             )}
+          </>
+        )}
+
+        {tab === 'notes' && (
+          <>
+            {/*
+              Kuruma ait notlar.
+
+              Buradan eklenen not hem bu listede, hem kurumun zaman
+              tünelinde, hem de "Notlarım" ekranında kurum etiketiyle
+              görünür — tek kaynak, üç görünüm.
+            */}
+            <div className="card mb-3" style={{ background: noteDraft.color }}>
+              <div className="card-body">
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label className="field-label" htmlFor="cn-title">Başlık</label>
+                  <input
+                    id="cn-title" className="input" value={noteDraft.title}
+                    placeholder="Görüşme notu"
+                    onChange={(event) => setNoteDraft((prev) => ({
+                      ...prev, title: event.target.value,
+                    }))}
+                  />
+                </div>
+
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label className="field-label" htmlFor="cn-body">Not</label>
+                  <textarea
+                    id="cn-body" className="textarea" rows={3} value={noteDraft.body}
+                    placeholder="Bu kurumla ilgili notunuzu yazın…"
+                    onChange={(event) => setNoteDraft((prev) => ({
+                      ...prev, body: event.target.value,
+                    }))}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted">Renk:</span>
+                  {NOTE_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className="note-swatch"
+                      style={{
+                        background: color,
+                        outline: noteDraft.color === color
+                          ? '2px solid var(--mke-navy)' : 'none',
+                      }}
+                      aria-label={`Renk ${color}`}
+                      onClick={() => setNoteDraft((prev) => ({ ...prev, color }))}
+                    />
+                  ))}
+
+                  <div className="flex gap-2" style={{ marginLeft: 'auto' }}>
+                    {editingNoteId && (
+                      <button type="button" className="btn btn-sm" onClick={cancelEditNote}>
+                        <IconX size={13} /> Vazgeç
+                      </button>
+                    )}
+                    <button
+                      type="button" className="btn btn-sm btn-primary"
+                      onClick={() => void saveNote()}
+                      disabled={noteSaving || !noteDraft.body.trim()}
+                    >
+                      {noteSaving ? <span className="spinner" /> : <IconCheck size={13} />}
+                      {' '}{editingNoteId ? 'Güncelle' : 'Not Ekle'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {notesLoading && notes.length === 0 && (
+              <div className="loading-center"><span className="spinner" /></div>
+            )}
+
+            {!notesLoading && notes.length === 0 && (
+              <div className="empty-state" style={{ padding: 28 }}>
+                <IconNote size={34} />
+                <p>Bu kuruma ait not yok. Yukarıdaki alandan ilk notu ekleyebilirsiniz.</p>
+              </div>
+            )}
+
+            <div className="note-list">
+              {notes.map((note) => (
+                <article
+                  key={note.id}
+                  className="note-card"
+                  style={{ background: note.color || NOTE_COLORS[0] }}
+                >
+                  <div className="note-card-head">
+                    <strong>{note.title || 'Not'}</strong>
+                    <span className="row-actions">
+                      <button
+                        type="button" className="btn btn-ghost btn-icon"
+                        style={{ width: 26, height: 26 }}
+                        aria-label="Notu düzenle"
+                        onClick={() => startEditNote(note)}
+                      >
+                        <IconEdit size={14} />
+                      </button>
+                      <button
+                        type="button" className="btn btn-ghost btn-icon"
+                        style={{ width: 26, height: 26, color: 'var(--danger)' }}
+                        aria-label="Notu sil"
+                        onClick={() => void removeNote(note)}
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    </span>
+                  </div>
+                  <p className="note-card-body">{note.body}</p>
+                  <div className="note-card-meta">
+                    {new Date(note.updatedAt ?? note.createdAt).toLocaleString('tr-TR', {
+                      day: '2-digit', month: '2-digit', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </div>
+                </article>
+              ))}
+            </div>
           </>
         )}
 

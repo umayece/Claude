@@ -34,6 +34,7 @@ import protocolRoutes from './routes/protocol.routes';
 import documentsRoutes from './routes/documents.routes';
 import activitiesRoutes from './routes/activities.routes';
 import notificationsRoutes from './routes/notifications.routes';
+import tagsRoutes from './routes/tags.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -113,6 +114,7 @@ export function createApp(): Express {
   api.use('/documents', documentsRoutes);
   api.use('/activities', activitiesRoutes);
   api.use('/notifications', notificationsRoutes);
+  api.use('/tags', tagsRoutes);
 
   app.use('/api/v1', api);
 

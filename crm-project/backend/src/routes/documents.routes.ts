@@ -18,6 +18,10 @@ export const DOCUMENT_CATEGORIES = [
   'SUNUM', 'SOZLESME_ORNEGI', 'TEKNIK_DOKUMAN',
   // Fuar/etkinlik sonrası ekibin hazırladığı değerlendirme raporu.
   'FUAR_SONUC_RAPORU', 'ETKINLIK_BELGESI',
+  // Stratejik pazarlama ve kurumsal doküman kategorileri.
+  'STRATEJIK_PAZARLAMA', 'PAZAR_ARASTIRMASI', 'HEYET_RAPORU', 'KURUMSAL_BELGE',
+  // İhracat kontrolü evrakı.
+  'EUC', 'IHRACAT_LISANSI',
   'DIGER',
 ] as const;
 

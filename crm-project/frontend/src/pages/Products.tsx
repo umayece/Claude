@@ -8,8 +8,9 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { useConfirm } from '../components/ConfirmDialog';
 import {
-  IconAlert, IconBox, IconEdit, IconPlus, IconSearch, IconTrash, IconUpload,
+  IconAlert, IconBox, IconEdit, IconPlus, IconSearch, IconShield, IconTrash, IconUpload,
 } from '../components/Icons';
+import { UN_HAZARD_CLASSES } from '../types';
 import type { CurrencyCode, Paginated, Product } from '../types';
 
 const CATEGORIES = ['Mühimmat', 'Ağır Silah', 'Kimyasal', 'Yedek Parça', 'Hizmet', 'Diğer'];
@@ -29,12 +30,30 @@ interface FormState {
   minStockLevel: string;
   unit: string;
   isActive: boolean;
+
+  // --- Ambalaj (koli/palet/konteyner hesabı) ---
+  caseQuantity: string;
+  caseLengthCm: string;
+  caseWidthCm: string;
+  caseHeightCm: string;
+  caseWeightKg: string;
+
+  // --- Savunma sanayii sınıflandırması ---
+  nsn: string;
+  militaryListCategory: string;
+  unNumber: string;
+  hazardClass: string;
+  neqGrams: string;
+  requiresExportLicence: boolean;
 }
 
 const EMPTY: FormState = {
   sku: '', name: '', description: '', category: 'Yedek Parça', unitPrice: '0',
   currency: 'USD', taxRate: '20', stockQuantity: '0', minStockLevel: '0',
   unit: 'Adet', isActive: true,
+  caseQuantity: '', caseLengthCm: '', caseWidthCm: '', caseHeightCm: '', caseWeightKg: '',
+  nsn: '', militaryListCategory: '', unNumber: '', hazardClass: '', neqGrams: '',
+  requiresExportLicence: true,
 };
 
 interface ImportSummary {
@@ -123,6 +142,17 @@ export function Products() {
       minStockLevel: String(product.minStockLevel),
       unit: product.unit,
       isActive: product.isActive,
+      caseQuantity: product.caseQuantity != null ? String(product.caseQuantity) : '',
+      caseLengthCm: product.caseLengthCm != null ? String(product.caseLengthCm) : '',
+      caseWidthCm: product.caseWidthCm != null ? String(product.caseWidthCm) : '',
+      caseHeightCm: product.caseHeightCm != null ? String(product.caseHeightCm) : '',
+      caseWeightKg: product.caseWeightKg != null ? String(product.caseWeightKg) : '',
+      nsn: product.nsn ?? '',
+      militaryListCategory: product.militaryListCategory ?? '',
+      unNumber: product.unNumber ?? '',
+      hazardClass: product.hazardClass ?? '',
+      neqGrams: product.neqGrams != null ? String(product.neqGrams) : '',
+      requiresExportLicence: product.requiresExportLicence ?? true,
     });
     setFormError(null);
     setFormOpen(true);
@@ -144,6 +174,19 @@ export function Products() {
         minStockLevel: Math.trunc(Number(form.minStockLevel) || 0),
         unit: form.unit,
         isActive: form.isActive,
+        // Boş bırakılan sayısal alanlar 0 DEĞİL null: "tanımsız" ile
+        // "sıfır" farklı şeylerdir ve hesaplayıcı bunu ayırt etmeli.
+        caseQuantity: form.caseQuantity === '' ? null : Math.trunc(Number(form.caseQuantity) || 0),
+        caseLengthCm: form.caseLengthCm === '' ? null : Number(form.caseLengthCm) || 0,
+        caseWidthCm: form.caseWidthCm === '' ? null : Number(form.caseWidthCm) || 0,
+        caseHeightCm: form.caseHeightCm === '' ? null : Number(form.caseHeightCm) || 0,
+        caseWeightKg: form.caseWeightKg === '' ? null : Number(form.caseWeightKg) || 0,
+        nsn: form.nsn || null,
+        militaryListCategory: form.militaryListCategory || null,
+        unNumber: form.unNumber || null,
+        hazardClass: form.hazardClass || null,
+        neqGrams: form.neqGrams === '' ? null : Number(form.neqGrams) || 0,
+        requiresExportLicence: form.requiresExportLicence,
       };
 
       if (editing) await api.put(`/products/${editing.id}`, payload);
@@ -478,13 +521,137 @@ export function Products() {
           </div>
         </div>
 
-        <div className="field" style={{ marginBottom: 0 }}>
+        <div className="field">
           <label className="field-label" htmlFor="p-desc">Açıklama</label>
           <textarea
             id="p-desc" className="textarea" rows={3} value={form.description}
             onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
           />
         </div>
+
+        {/*
+          Ambalaj bilgisi lojistik hesaplayıcının girdisidir: burada
+          doldurulursa kullanıcı katalogdan ürünü seçtiğinde sandık,
+          palet ve konteyner hesabı elle giriş yapmadan çıkar.
+        */}
+        <h3 className="mb-2 mt-3"><IconBox size={14} /> Ambalaj Bilgisi</h3>
+
+        <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="p-caseqty">Sandıktaki Adet</label>
+            <input
+              id="p-caseqty" className="input" type="number" min={0} value={form.caseQuantity}
+              placeholder="1600"
+              onChange={(event) => setForm((prev) => ({
+                ...prev, caseQuantity: event.target.value,
+              }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="p-casewt">Sandık Brüt Ağırlık (kg)</label>
+            <input
+              id="p-casewt" className="input" type="number" min={0} step="0.1"
+              value={form.caseWeightKg} placeholder="30"
+              onChange={(event) => setForm((prev) => ({
+                ...prev, caseWeightKg: event.target.value,
+              }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="p-casedim">Sandık Ölçüsü (cm)</label>
+            <div className="flex gap-1">
+              <input
+                id="p-casedim" className="input" type="number" min={0} placeholder="U"
+                value={form.caseLengthCm}
+                onChange={(event) => setForm((prev) => ({
+                  ...prev, caseLengthCm: event.target.value,
+                }))}
+              />
+              <input
+                className="input" type="number" min={0} placeholder="G" aria-label="Genişlik"
+                value={form.caseWidthCm}
+                onChange={(event) => setForm((prev) => ({
+                  ...prev, caseWidthCm: event.target.value,
+                }))}
+              />
+              <input
+                className="input" type="number" min={0} placeholder="Y" aria-label="Yükseklik"
+                value={form.caseHeightCm}
+                onChange={(event) => setForm((prev) => ({
+                  ...prev, caseHeightCm: event.target.value,
+                }))}
+              />
+            </div>
+          </div>
+        </div>
+
+        <h3 className="mb-2 mt-3"><IconShield size={14} /> Savunma Sanayii Sınıflandırması</h3>
+
+        <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="p-nsn">NATO Stok Numarası (NSN)</label>
+            <input
+              id="p-nsn" className="input mono" value={form.nsn}
+              placeholder="1305-27-123-4567"
+              onChange={(event) => setForm((prev) => ({ ...prev, nsn: event.target.value }))}
+            />
+            <span className="text-xs text-muted">13 hane; NATO tedarik zincirinde ürünün kimliğidir.</span>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="p-ml">Askeri Liste Sınıfı</label>
+            <input
+              id="p-ml" className="input mono" value={form.militaryListCategory}
+              placeholder="ML3"
+              onChange={(event) => setForm((prev) => ({
+                ...prev, militaryListCategory: event.target.value,
+              }))}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="p-un">BM Madde No</label>
+            <input
+              id="p-un" className="input mono" value={form.unNumber}
+              placeholder="UN0012"
+              onChange={(event) => setForm((prev) => ({ ...prev, unNumber: event.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="p-hazard">Tehlike Sınıfı</label>
+            <select
+              id="p-hazard" className="select" value={form.hazardClass}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, hazardClass: event.target.value,
+              }))}
+            >
+              <option value="">Tehlikeli madde değil</option>
+              {UN_HAZARD_CLASSES.map((item) => (
+                <option key={item.code} value={item.code}>{item.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="p-neq">NEQ (gram/birim)</label>
+            <input
+              id="p-neq" className="input" type="number" min={0} step="0.01"
+              value={form.neqGrams} placeholder="1.7"
+              onChange={(event) => setForm((prev) => ({ ...prev, neqGrams: event.target.value }))}
+            />
+            <span className="text-xs text-muted">Net patlayıcı ağırlığı; sevkiyat izninin dayanağı.</span>
+          </div>
+        </div>
+
+        <label className="checkbox-row" style={{ marginBottom: 0 }}>
+          <input
+            type="checkbox" checked={form.requiresExportLicence}
+            onChange={(event) => setForm((prev) => ({
+              ...prev, requiresExportLicence: event.target.checked,
+            }))}
+          />
+          <span>Bu ürünün ihracatı izne tabidir (MSB / SSB)</span>
+        </label>
       </Modal>
 
       <Modal

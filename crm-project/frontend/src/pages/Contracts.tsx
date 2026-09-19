@@ -13,11 +13,14 @@ import { printCorporateDocument } from '../utils/corporatePrint';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
 import {
   IconAlert, IconBox, IconClock, IconCredit, IconDownload, IconEdit, IconFile,
-  IconPlus, IconSearch, IconTrash,
+  IconPlus, IconSearch, IconShield, IconTrash, IconTruck,
 } from '../components/Icons';
+import {
+  EUC_STATUSES, EXPORT_LICENCE_STATUSES, INCOTERMS, LICENCE_AUTHORITIES,
+} from '../types';
 import type {
-  Company, Contract, CurrencyCode, DeliveryInfo, DeliveryUrgency,
-  Paginated, PaymentMilestone,
+  Company, Contract, CurrencyCode, DeliveryInfo, DeliveryUrgency, EucStatus,
+  ExportLicenceStatus, ExportReadiness, Paginated, PaymentMilestone,
 } from '../types';
 
 const CONTRACT_STATUSES = ['Taslak', 'Aktif', 'Askıda', 'Tamamlandı', 'Feshedildi'] as const;
@@ -43,6 +46,21 @@ interface FormState {
   cogs: string;
   cogsCurrency: CurrencyCode;
   cogsNote: string;
+  // --- Teslim şekli ve ihracat kontrolü ---
+  incoterm: string;
+  incotermPlace: string;
+  eucStatus: EucStatus;
+  eucAuthority: string;
+  eucReference: string;
+  eucReceivedAt: string;
+  exportLicenceStatus: ExportLicenceStatus;
+  exportLicenceAuthority: string;
+  exportLicenceNumber: string;
+  exportLicenceAppliedAt: string;
+  exportLicenceExpiresAt: string;
+  exportLicenceNote: string;
+  stockReserved: boolean;
+  stockNote: string;
 }
 
 const EMPTY: FormState = {
@@ -50,6 +68,28 @@ const EMPTY: FormState = {
   currency: 'USD', startDate: '', endDate: '', renewalDate: '', description: '',
   deliveryDate: '', deliveryNote: '', deliveredAt: '',
   cogs: '', cogsCurrency: 'USD', cogsNote: '',
+  incoterm: '', incotermPlace: '',
+  eucStatus: 'Gerekli Değil', eucAuthority: '', eucReference: '', eucReceivedAt: '',
+  exportLicenceStatus: 'Başvurulmadı', exportLicenceAuthority: '',
+  exportLicenceNumber: '', exportLicenceAppliedAt: '', exportLicenceExpiresAt: '',
+  exportLicenceNote: '', stockReserved: false, stockNote: '',
+};
+
+/** Sevkiyat hazırlık rozetinin sınıfı. */
+function gateClass(readiness: ExportReadiness): string {
+  switch (readiness) {
+    case 'HAZIR': return 'gate-hazir';
+    case 'BEKLIYOR': return 'gate-bekliyor';
+    case 'ENGELLI': return 'gate-engelli';
+    default: return 'gate-gereksiz';
+  }
+}
+
+const GATE_LABEL: Record<ExportReadiness, string> = {
+  HAZIR: 'Sevkiyata Hazır',
+  BEKLIYOR: 'İzin Bekliyor',
+  ENGELLI: 'Sevkiyat Engelli',
+  GEREKSIZ: 'İzin Gerekmiyor',
 };
 
 interface MilestoneForm {
@@ -213,6 +253,22 @@ export function Contracts() {
       cogs: contract.cogs != null ? String(contract.cogs) : '',
       cogsCurrency: contract.cogsCurrency ?? 'USD',
       cogsNote: contract.cogsNote ?? '',
+      incoterm: contract.incoterm ?? '',
+      incotermPlace: contract.incotermPlace ?? '',
+      eucStatus: contract.eucStatus ?? 'Gerekli Değil',
+      eucAuthority: contract.eucAuthority ?? '',
+      eucReference: contract.eucReference ?? '',
+      eucReceivedAt: contract.eucReceivedAt ? contract.eucReceivedAt.slice(0, 10) : '',
+      exportLicenceStatus: contract.exportLicenceStatus ?? 'Başvurulmadı',
+      exportLicenceAuthority: contract.exportLicenceAuthority ?? '',
+      exportLicenceNumber: contract.exportLicenceNumber ?? '',
+      exportLicenceAppliedAt: contract.exportLicenceAppliedAt
+        ? contract.exportLicenceAppliedAt.slice(0, 10) : '',
+      exportLicenceExpiresAt: contract.exportLicenceExpiresAt
+        ? contract.exportLicenceExpiresAt.slice(0, 10) : '',
+      exportLicenceNote: contract.exportLicenceNote ?? '',
+      stockReserved: contract.stockReserved ?? false,
+      stockNote: contract.stockNote ?? '',
     });
     setFormError(null);
     setFormOpen(true);
@@ -245,6 +301,20 @@ export function Contracts() {
         cogs: form.cogs === '' ? null : Number(form.cogs) || 0,
         cogsCurrency: form.cogsCurrency,
         cogsNote: form.cogsNote || null,
+        incoterm: form.incoterm || null,
+        incotermPlace: form.incotermPlace || null,
+        eucStatus: form.eucStatus,
+        eucAuthority: form.eucAuthority || null,
+        eucReference: form.eucReference || null,
+        eucReceivedAt: form.eucReceivedAt || null,
+        exportLicenceStatus: form.exportLicenceStatus,
+        exportLicenceAuthority: form.exportLicenceAuthority || null,
+        exportLicenceNumber: form.exportLicenceNumber || null,
+        exportLicenceAppliedAt: form.exportLicenceAppliedAt || null,
+        exportLicenceExpiresAt: form.exportLicenceExpiresAt || null,
+        exportLicenceNote: form.exportLicenceNote || null,
+        stockReserved: form.stockReserved,
+        stockNote: form.stockNote || null,
       };
 
       if (editing) await api.put(`/contracts/${editing.id}`, payload);
@@ -362,8 +432,34 @@ export function Contracts() {
               contract.endDate ? new Date(contract.endDate).toLocaleDateString('tr-TR') : '—'],
             ['Yenileme Tarihi',
               contract.renewalDate ? new Date(contract.renewalDate).toLocaleDateString('tr-TR') : '—'],
+            ...(contract.deliveryDate
+              ? ([['Termin (Teslim) Tarihi',
+                new Date(contract.deliveryDate).toLocaleDateString('tr-TR')]] as [string, string][])
+              : []),
+            ...(contract.incoterm
+              ? ([['Teslim Şekli',
+                `${contract.incoterm}${contract.incotermPlace ? ` — ${contract.incotermPlace}` : ''}`]] as [string, string][])
+              : []),
           ],
         },
+        // İhracat kontrolü bölümü yalnızca izne tabi sözleşmelerde basılır:
+        // yurt içi bir sözleşmede boş bir "izin" başlığı kafa karıştırır.
+        ...(contract.exportLicenceStatus && contract.exportLicenceStatus !== 'Gerekli Değil'
+          ? [{
+            heading: 'İhracat Kontrolü ve Son Kullanıcı Beyanı',
+            rows: [
+              ['İhracat İzni Durumu', contract.exportLicenceStatus],
+              ['İzni Veren Makam', contract.exportLicenceAuthority ?? '—'],
+              ['İzin No', contract.exportLicenceNumber ?? '—'],
+              ['İzin Geçerlilik Bitişi',
+                contract.exportLicenceExpiresAt
+                  ? new Date(contract.exportLicenceExpiresAt).toLocaleDateString('tr-TR') : '—'],
+              ['Son Kullanıcı Belgesi (EUC)', contract.eucStatus ?? '—'],
+              ['EUC Düzenleyen Makam', contract.eucAuthority ?? '—'],
+              ['EUC Belge No', contract.eucReference ?? '—'],
+            ] as [string, string][],
+          }]
+          : []),
         ...(contract.description
           ? [{ heading: 'Sözleşmenin Konusu', paragraphs: [contract.description] }]
           : []),
@@ -393,6 +489,12 @@ export function Contracts() {
               'belirtilen hakediş takvimine uygun olarak gerçekleştirilir.',
             'İşbu sözleşmeden doğabilecek uyuşmazlıklarda Ankara Mahkemeleri ve ' +
             'İcra Daireleri yetkilidir.',
+            ...(contract.exportLicenceStatus && contract.exportLicenceStatus !== 'Gerekli Değil'
+              ? ['Alıcı, sözleşme konusu malzemeyi yalnızca Son Kullanıcı Belgesinde '
+                + 'beyan edilen amaçla kullanacağını; üçüncü ülkelere yeniden ihraç, '
+                + 'devir veya transferi için Türkiye Cumhuriyeti yetkili makamlarının '
+                + 'önceden yazılı iznini alacağını kabul ve taahhüt eder.']
+              : []),
           ],
         },
       ],
@@ -599,6 +701,47 @@ export function Contracts() {
                     )}
                   </span>
                 </SpecRow>
+                {/* Sevkiyat kapısı en üstte: izin yoksa geri kalan her şey
+                    ikincildir. */}
+                {detail.exportGate && detail.exportGate.readiness !== 'GEREKSIZ' && (
+                  <SpecRow label="Sevkiyat Durumu">
+                    <span className="dual-amount">
+                      <span className={`gate-badge ${gateClass(detail.exportGate.readiness)}`}>
+                        {GATE_LABEL[detail.exportGate.readiness]}
+                      </span>
+                      <span className="dual-secondary">{detail.exportGate.reason}</span>
+                    </span>
+                  </SpecRow>
+                )}
+                {detail.incoterm && (
+                  <SpecRow label="Teslim Şekli">
+                    {detail.incoterm}
+                    {detail.incotermPlace && ` — ${detail.incotermPlace}`}
+                  </SpecRow>
+                )}
+                {detail.exportLicenceNumber && (
+                  <SpecRow label="İhracat İzni">
+                    <span className="dual-amount">
+                      <span className="mono">{detail.exportLicenceNumber}</span>
+                      <span className="dual-secondary">
+                        {detail.exportLicenceAuthority ?? '—'}
+                        {detail.exportLicenceExpiresAt
+                          && ` · ${new Date(detail.exportLicenceExpiresAt).toLocaleDateString('tr-TR')} tarihine kadar`}
+                      </span>
+                    </span>
+                  </SpecRow>
+                )}
+                {detail.eucStatus !== 'Gerekli Değil' && (
+                  <SpecRow label="Son Kullanıcı Belgesi">
+                    <span className="dual-amount">
+                      <span>{detail.eucStatus}</span>
+                      {detail.eucAuthority && (
+                        <span className="dual-secondary">{detail.eucAuthority}</span>
+                      )}
+                    </span>
+                  </SpecRow>
+                )}
+
                 {/* Termin durumu künyede: satış ekibi sözleşmeyi açar açmaz görmeli. */}
                 {detail.delivery && detail.delivery.deliveryDate && (
                   <SpecRow label="Termin">
@@ -1069,6 +1212,178 @@ export function Contracts() {
               placeholder="Hammadde tedarik gecikmesi"
             />
           </div>
+        </div>
+
+        {/*
+          Teslim şekli ve ihracat kontrolü.
+
+          Savunma sanayii ihracatında sevkiyat, izin onaylanmadan
+          BAŞLAYAMAZ. Bu alanlar sözleşmenin sevk edilebilirliğini
+          belirleyen kapıdır; detay ekranında rozet olarak özetlenir.
+        */}
+        <h3 className="mb-2 mt-3"><IconTruck size={14} /> Teslim Şekli (Incoterms 2020)</h3>
+
+        <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-incoterm">Teslim Şekli</label>
+            <select
+              id="ct-incoterm" className="select" value={form.incoterm}
+              onChange={(event) => setForm((prev) => ({ ...prev, incoterm: event.target.value }))}
+            >
+              <option value="">Belirtilmedi</option>
+              {INCOTERMS.map((item) => (
+                <option key={item.code} value={item.code}>{item.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-incoplace">Teslim Yeri</label>
+            <input
+              id="ct-incoplace" className="input" value={form.incotermPlace}
+              placeholder="Hamad Port, Doha"
+              onChange={(event) => setForm((prev) => ({
+                ...prev, incotermPlace: event.target.value,
+              }))}
+            />
+          </div>
+        </div>
+
+        <h3 className="mb-2 mt-3"><IconShield size={14} /> İhracat Kontrolü</h3>
+
+        <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-licst">İhracat İzni Durumu</label>
+            <select
+              id="ct-licst" className="select" value={form.exportLicenceStatus}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, exportLicenceStatus: event.target.value as ExportLicenceStatus,
+              }))}
+            >
+              {EXPORT_LICENCE_STATUSES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-licauth">İzni Veren Makam</label>
+            <select
+              id="ct-licauth" className="select" value={form.exportLicenceAuthority}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, exportLicenceAuthority: event.target.value,
+              }))}
+            >
+              <option value="">Belirtilmedi</option>
+              {LICENCE_AUTHORITIES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-licno">İzin No</label>
+            <input
+              id="ct-licno" className="input mono" value={form.exportLicenceNumber}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, exportLicenceNumber: event.target.value,
+              }))}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-licapp">Başvuru Tarihi</label>
+            <input
+              id="ct-licapp" className="input" type="date" value={form.exportLicenceAppliedAt}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, exportLicenceAppliedAt: event.target.value,
+              }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-licexp">Geçerlilik Bitişi</label>
+            <input
+              id="ct-licexp" className="input" type="date" value={form.exportLicenceExpiresAt}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, exportLicenceExpiresAt: event.target.value,
+              }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-licnote">İzin Notu</label>
+            <input
+              id="ct-licnote" className="input" value={form.exportLicenceNote}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, exportLicenceNote: event.target.value,
+              }))}
+            />
+          </div>
+        </div>
+
+        <h3 className="mb-2 mt-3">Son Kullanıcı Belgesi (EUC)</h3>
+
+        <div className="grid grid-4" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-euc">Durum</label>
+            <select
+              id="ct-euc" className="select" value={form.eucStatus}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, eucStatus: event.target.value as EucStatus,
+              }))}
+            >
+              {EUC_STATUSES.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-eucauth">Düzenleyen Makam</label>
+            <input
+              id="ct-eucauth" className="input" value={form.eucAuthority}
+              placeholder="Katar Savunma Bakanlığı"
+              onChange={(event) => setForm((prev) => ({
+                ...prev, eucAuthority: event.target.value,
+              }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-eucref">Belge No</label>
+            <input
+              id="ct-eucref" className="input mono" value={form.eucReference}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, eucReference: event.target.value,
+              }))}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="ct-eucdate">Alınma Tarihi</label>
+            <input
+              id="ct-eucdate" className="input" type="date" value={form.eucReceivedAt}
+              onChange={(event) => setForm((prev) => ({
+                ...prev, eucReceivedAt: event.target.value,
+              }))}
+            />
+          </div>
+        </div>
+
+        <h3 className="mb-2 mt-3"><IconBox size={14} /> Stok Rezervasyonu</h3>
+
+        <label className="checkbox-row mb-2">
+          <input
+            type="checkbox" checked={form.stockReserved}
+            onChange={(event) => setForm((prev) => ({
+              ...prev, stockReserved: event.target.checked,
+            }))}
+          />
+          <span>Bu sipariş için stok rezerve edildi</span>
+        </label>
+
+        <div className="field">
+          <label className="field-label" htmlFor="ct-stocknote">Stok / Üretim Notu</label>
+          <input
+            id="ct-stocknote" className="input" value={form.stockNote}
+            placeholder="3.000 adet depoda, kalan 7.000 adet Ekim üretim planında"
+            onChange={(event) => setForm((prev) => ({ ...prev, stockNote: event.target.value }))}
+          />
         </div>
 
         <h3 className="mb-2 mt-3">Gerçekleşen Maliyet (COGS)</h3>

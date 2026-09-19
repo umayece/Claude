@@ -102,6 +102,8 @@ export interface Company {
   tenders?: Tender[];
   contracts?: Contract[];
   tickets?: Ticket[];
+  /** İlişkisel etiket bağları. */
+  tags?: TagLink[];
 }
 
 export interface MapPoint {
@@ -179,6 +181,7 @@ export interface Contact {
   deals?: Deal[];
   offers?: Offer[];
   tickets?: Ticket[];
+  tags?: TagLink[];
 }
 
 export interface Deal {
@@ -274,6 +277,8 @@ export interface Offer {
   total: number;
   costTotal: number;
   costCurrency: CurrencyCode;
+  incoterm: string | null;
+  incotermPlace: string | null;
   margin?: OfferMargin;
   totalTry?: number;
   amountTry?: number;
@@ -348,6 +353,27 @@ export interface Contract {
   cogsCurrency: CurrencyCode;
   cogsNote: string | null;
 
+  // --- Teslim şekli (Incoterms 2020) ---
+  incoterm: string | null;
+  incotermPlace: string | null;
+
+  // --- İhracat kontrolü ---
+  eucStatus: EucStatus;
+  eucAuthority: string | null;
+  eucReference: string | null;
+  eucReceivedAt: string | null;
+  exportLicenceStatus: ExportLicenceStatus;
+  exportLicenceAuthority: string | null;
+  exportLicenceNumber: string | null;
+  exportLicenceAppliedAt: string | null;
+  exportLicenceIssuedAt: string | null;
+  exportLicenceExpiresAt: string | null;
+  exportLicenceNote: string | null;
+  /** Sunucuda hesaplanan sevkiyat hazırlık durumu. */
+  exportGate?: ExportGate;
+  stockReserved: boolean;
+  stockNote: string | null;
+
   createdAt: string;
   company?: { id: string; name: string };
   offer?: { id: string; offerNumber: string; title: string } | null;
@@ -414,6 +440,17 @@ export interface Product {
   caseHeightCm?: number | null;
   caseWeightKg?: number | null;
   hazardClass?: string | null;
+
+  // --- Savunma sanayii sınıflandırması ---
+  /** BM madde numarası, ör. "UN0012". */
+  unNumber?: string | null;
+  /** Birim başına net patlayıcı ağırlığı (gram). */
+  neqGrams?: number | null;
+  /** NATO Stok Numarası, 13 hane. */
+  nsn?: string | null;
+  /** Askeri Liste sınıfı, ör. "ML3". */
+  militaryListCategory?: string | null;
+  requiresExportLicence?: boolean;
 }
 
 export interface Ticket {
@@ -633,6 +670,9 @@ export interface StickyNote {
   deal?: { id: string; title: string } | null;
   user?: { id: string; name: string; avatarUrl: string | null } | null;
 }
+
+/** `StickyNote` ile aynı kayıt; kurum detayında bu adla anılır. */
+export type Note = StickyNote;
 
 // ---------------------------------------------------------------------------
 // Protokol & heyet programı
@@ -890,4 +930,97 @@ export interface NotificationItem {
   severity: number;
   dueDate: string | null;
   daysUntil: number | null;
+}
+
+
+// ===========================================================================
+// Etiketler
+// ===========================================================================
+
+export interface Tag {
+  id: string;
+  name: string;
+  /** Rozet rengi (#RRGGBB). */
+  color: string;
+  description: string | null;
+  createdAt: string;
+}
+
+export interface TagSummary extends Tag {
+  companyCount: number;
+  contactCount: number;
+  totalCount: number;
+}
+
+/** Kurum/kişi yanıtlarında gömülü gelen etiket bağı. */
+export interface TagLink {
+  tag: { id: string; name: string; color: string };
+}
+
+export interface TagRecords {
+  tag: Tag;
+  companies: {
+    id: string; name: string; type: CompanyType; status: string;
+    country: string; countryCode: string;
+  }[];
+  contacts: {
+    id: string; firstName: string; lastName: string; title: string | null;
+    contactType: ContactType; country: string;
+    company: { id: string; name: string } | null;
+  }[];
+}
+
+// ===========================================================================
+// Savunma sanayii dış ticaret
+// ===========================================================================
+
+export const INCOTERMS: { code: string; label: string }[] = [
+  { code: 'EXW', label: 'EXW — Ex Works (Fabrika Teslimi)' },
+  { code: 'FCA', label: 'FCA — Free Carrier (Taşıyıcıya Teslim)' },
+  { code: 'FAS', label: 'FAS — Free Alongside Ship' },
+  { code: 'FOB', label: 'FOB — Free On Board (Gemi Bordasında)' },
+  { code: 'CFR', label: 'CFR — Cost and Freight' },
+  { code: 'CIF', label: 'CIF — Cost, Insurance and Freight' },
+  { code: 'CPT', label: 'CPT — Carriage Paid To' },
+  { code: 'CIP', label: 'CIP — Carriage and Insurance Paid To' },
+  { code: 'DAP', label: 'DAP — Delivered At Place' },
+  { code: 'DPU', label: 'DPU — Delivered at Place Unloaded' },
+  { code: 'DDP', label: 'DDP — Delivered Duty Paid' },
+];
+
+export const EUC_STATUSES = [
+  'Gerekli Değil', 'Talep Edildi', 'Beklemede', 'Alındı', 'Reddedildi',
+] as const;
+export type EucStatus = (typeof EUC_STATUSES)[number];
+
+export const EXPORT_LICENCE_STATUSES = [
+  'Gerekli Değil', 'Başvurulmadı', 'Başvuruldu', 'İnceleniyor',
+  'Onaylandı', 'Reddedildi', 'Süresi Doldu',
+] as const;
+export type ExportLicenceStatus = (typeof EXPORT_LICENCE_STATUSES)[number];
+
+export const LICENCE_AUTHORITIES = [
+  'MSB (Millî Savunma Bakanlığı)',
+  'SSB (Savunma Sanayii Başkanlığı)',
+  'Dışişleri Bakanlığı',
+  'Ticaret Bakanlığı',
+  'Diğer',
+];
+
+export const UN_HAZARD_CLASSES = [
+  { code: '1.1', label: '1.1 — Kütlesel patlama tehlikesi' },
+  { code: '1.2', label: '1.2 — Parça saçma tehlikesi' },
+  { code: '1.3', label: '1.3 — Yangın, hafif patlama tehlikesi' },
+  { code: '1.4', label: '1.4 — Önemli tehlike arz etmeyen' },
+  { code: '1.5', label: '1.5 — Çok duyarsız, kütlesel patlama tehlikeli' },
+  { code: '1.6', label: '1.6 — Aşırı duyarsız' },
+];
+
+export type ExportReadiness = 'HAZIR' | 'BEKLIYOR' | 'ENGELLI' | 'GEREKSIZ';
+
+/** Sevkiyat yapılabilir mi? Sunucuda izin ve EUC durumundan türer. */
+export interface ExportGate {
+  readiness: ExportReadiness;
+  reason: string;
+  licenceDaysLeft: number | null;
 }

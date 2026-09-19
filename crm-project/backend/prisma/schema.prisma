@@ -235,6 +235,7 @@ model Company {
   visits     ProtocolVisit[]
   documents  DocumentFile[]
   businessActivities BusinessActivity[]
+  tags               CompanyTag[]
 
   @@index([deletedAt])
   @@index([name])
@@ -300,6 +301,7 @@ model Contact {
   visitRoles VisitParticipant[]
 
   activityLinks ActivityContact[]
+  tags          ContactTag[]
 
   @@index([companyId])
   @@index([deletedAt])
@@ -404,6 +406,12 @@ model Offer {
   /// Maliyet para birimi satış para biriminden farklı olabilir:
   /// hammadde USD alınıp teklif EUR verilebilir.
   costCurrency String @default("USD")
+
+  /// Teslim şekli — Incoterms 2020 (EXW, FCA, FAS, FOB, CFR, CIF, CPT,
+  /// CIP, DAP, DPU, DDP). Fiyatın neyi kapsadığını belirler.
+  incoterm      String?
+  /// Teslim yeri: "İstanbul Limanı", "Hamad Port, Doha"
+  incotermPlace String?
 
   validUntil DateTime?
   notes      String?
@@ -528,6 +536,33 @@ model Contract {
   cogsCurrency String  @default("USD")
   cogsNote     String?
 
+  // --- Teslim şekli (Incoterms 2020) ---
+  incoterm      String?
+  incotermPlace String?
+
+  // --- İhracat kontrolü (savunma sanayii) ---
+  /// Son Kullanıcı Belgesi alındı mı? İhracat izninin ön şartıdır.
+  eucStatus     String  @default("Gerekli Değil")
+  /// EUC'yi düzenleyen resmî makam.
+  eucAuthority  String?
+  eucReference  String?
+  eucReceivedAt DateTime?
+
+  /// İhracat izni durumu: Gerekli Değil, Başvurulmadı, Başvuruldu,
+  /// İnceleniyor, Onaylandı, Reddedildi, Süresi Doldu
+  exportLicenceStatus    String  @default("Başvurulmadı")
+  /// İzni veren makam: MSB, SSB, Dışişleri, Diğer
+  exportLicenceAuthority String?
+  exportLicenceNumber    String?
+  exportLicenceAppliedAt DateTime?
+  exportLicenceIssuedAt  DateTime?
+  exportLicenceExpiresAt DateTime?
+  exportLicenceNote      String?
+
+  /// Sipariş için stok rezerve edildi mi?
+  stockReserved Boolean @default(false)
+  stockNote     String?
+
   deletedAt DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -544,6 +579,8 @@ model Contract {
   @@index([endDate])
   @@index([renewalDate])
   @@index([deliveryDate])
+  @@index([exportLicenceStatus])
+  @@index([exportLicenceExpiresAt])
 }
 
 model PaymentMilestone {
@@ -599,8 +636,21 @@ model Product {
   caseHeightCm   Float?
   /// Dolu sandığın brüt ağırlığı (kg)
   caseWeightKg   Float?
-  /// Tehlikeli madde sınıfı (ör. "1.4S") — konteyner planlamasını etkiler
+  /// BM tehlike sınıfı (ör. "1.1D", "1.4S") — konteyner ve izin planını etkiler
   hazardClass    String?
+  /// BM madde numarası (ör. "UN0012")
+  unNumber       String?
+  /// Net patlayıcı ağırlığı — birim başına gram. Sevkiyat izinlerinin
+  /// ve konteyner limitlerinin dayanağıdır.
+  neqGrams       Float?
+
+  // --- Savunma sanayii sınıflandırması ---
+  /// NATO Stok Numarası, 13 hane (ör. "1305-27-123-4567")
+  nsn            String?
+  /// Askeri Liste sınıflandırması (ör. "ML3" — mühimmat)
+  militaryListCategory String?
+  /// İhracat izni gerektiriyor mu? (MSB / SSB kontrolü)
+  requiresExportLicence Boolean @default(true)
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -612,6 +662,7 @@ model Product {
   @@index([category])
   @@index([sku])
   @@index([name])
+  @@index([nsn])
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,4 +1184,53 @@ model ActivityContact {
   @@unique([activityId, contactId])
   @@index([activityId])
   @@index([contactId])
+}
+
+// ===========================================================================
+// Etiketler
+// ---------------------------------------------------------------------------
+// Etiketler daha önce `customFields` JSON alanının içinde serbest metin
+// olarak duruyordu. Bu yüzden "bu etikete sahip kayıtlar" sorgusu yazılamıyor,
+// etiket yeniden adlandırılamıyor ve bir kayıttan merkezî olarak
+// kaldırılamıyordu. İlişkisel model bunların üçünü de tek sorguyla çözer.
+// ===========================================================================
+
+model Tag {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  /// Rozet rengi (hex). Varsayılan kurumsal bronz.
+  color       String  @default("#C5A059")
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companies CompanyTag[]
+  contacts  ContactTag[]
+
+  @@index([name])
+}
+
+model CompanyTag {
+  companyId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, tagId])
+  @@index([tagId])
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
 }

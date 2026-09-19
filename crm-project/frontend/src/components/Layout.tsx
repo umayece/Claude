@@ -55,6 +55,7 @@ const GROUPS: NavGroup[] = [
       { to: '/products', label: 'Ürün Kataloğu', icon: <IconBox size={17} />, permission: 'product:read' },
       { to: '/tickets', label: 'Destek & Garanti', icon: <IconWrench size={17} />, permission: 'ticket:read' },
       { to: '/notes', label: 'Notlarım', icon: <IconNote size={17} /> },
+      { to: '/tags', label: 'Etiketler', icon: <IconArchive size={17} />, permission: 'company:read' },
       { to: '/outbox', label: 'Giden Kutusu', icon: <IconInbox size={17} />, permission: 'email:read' },
     ],
   },
@@ -100,6 +101,7 @@ export function Layout() {
           <div className="sidebar-brand-text">
             <strong>MKE A.Ş.</strong>
             <span>Kurumsal CRM</span>
+            <span className="sidebar-badge">Makina ve Kimya Endüstrisi</span>
           </div>
         </div>
 

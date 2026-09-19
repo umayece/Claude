@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
-import { IconAlert, IconBox } from './Icons';
+import { IconAlert, IconBox, IconDownload } from './Icons';
+import { printCorporateDocument } from '../utils/corporatePrint';
 import type { Paginated, Product } from '../types';
 
 /**
@@ -46,6 +47,11 @@ interface Row {
   caseHeightCm: string;
   caseWeightKg: string;
   hazardClass: string | null;
+  unNumber: string | null;
+  /** Sandık başına M2A1 kutu adedi (0 = ara kutu yok). */
+  cansPerCase: string;
+  /** Birim başına net patlayıcı ağırlığı (gram). */
+  neqGramsPerRound: string;
 }
 
 function emptyRow(index: number): Row {
@@ -54,6 +60,7 @@ function emptyRow(index: number): Row {
     productId: null, name: '', quantity: '1000',
     caseQuantity: '1000', caseLengthCm: '40', caseWidthCm: '30',
     caseHeightCm: '25', caseWeightKg: '20', hazardClass: null,
+    unNumber: null, cansPerCase: '0', neqGramsPerRound: '0',
   };
 }
 
@@ -77,6 +84,18 @@ interface AmmoPreset {
   /** Dolu sandığın brüt ağırlığı (kg) */
   grossWeightKg: number;
   hazardClass: string;
+  /** BM madde numarası */
+  unNumber: string;
+  /**
+   * Bir sandıktaki M2A1 tipi metal kutu adedi.
+   *
+   * Küçük çaplı mühimmat iki kademeli paketlenir: fişekler M2A1 metal
+   * kutuya, kutular ahşap sandığa girer. Büyük çaplı mühimmatta ara kutu
+   * yoktur; bu alan 0 bırakılır.
+   */
+  cansPerCase: number;
+  /** Birim (fişek/mermi) başına net patlayıcı ağırlığı — gram. */
+  neqGramsPerRound: number;
 }
 
 const AMMO_PRESETS: AmmoPreset[] = [
@@ -84,41 +103,55 @@ const AMMO_PRESETS: AmmoPreset[] = [
     key: '9x19', label: '9x19 mm Tabanca',
     roundsPerCase: 2000, lengthCm: 40, widthCm: 30, heightCm: 24,
     grossWeightKg: 28, hazardClass: '1.4S',
+    unNumber: 'UN0012', cansPerCase: 2, neqGramsPerRound: 0.35,
   },
   {
     key: '5.56x45', label: '5.56x45 mm NATO',
     roundsPerCase: 1600, lengthCm: 45, widthCm: 35, heightCm: 20,
     grossWeightKg: 30, hazardClass: '1.4S',
+    unNumber: 'UN0012', cansPerCase: 2, neqGramsPerRound: 1.7,
   },
   {
     key: '7.62x51', label: '7.62x51 mm NATO',
     roundsPerCase: 800, lengthCm: 45, widthCm: 35, heightCm: 20,
     grossWeightKg: 30, hazardClass: '1.4S',
+    unNumber: 'UN0012', cansPerCase: 2, neqGramsPerRound: 2.9,
+  },
+  {
+    key: '7.62x39', label: '7.62x39 mm',
+    roundsPerCase: 1440, lengthCm: 45, widthCm: 35, heightCm: 20,
+    grossWeightKg: 30, hazardClass: '1.4S',
+    unNumber: 'UN0012', cansPerCase: 2, neqGramsPerRound: 1.6,
   },
   {
     key: '12.7x99', label: '12.7x99 mm (.50 BMG)',
     roundsPerCase: 200, lengthCm: 60, widthCm: 36, heightCm: 26,
     grossWeightKg: 35, hazardClass: '1.4S',
+    unNumber: 'UN0012', cansPerCase: 2, neqGramsPerRound: 15.0,
   },
   {
     key: '40mm', label: '40 mm Bombaatar',
     roundsPerCase: 48, lengthCm: 50, widthCm: 38, heightCm: 30,
     grossWeightKg: 32, hazardClass: '1.2E',
+    unNumber: 'UN0006', cansPerCase: 0, neqGramsPerRound: 32.0,
   },
   {
     key: '81mm', label: '81 mm Havan',
     roundsPerCase: 6, lengthCm: 92, widthCm: 32, heightCm: 26,
     grossWeightKg: 42, hazardClass: '1.1D',
+    unNumber: 'UN0009', cansPerCase: 0, neqGramsPerRound: 950.0,
   },
   {
     key: '120mm', label: '120 mm Havan',
     roundsPerCase: 2, lengthCm: 110, widthCm: 34, heightCm: 30,
     grossWeightKg: 46, hazardClass: '1.1D',
+    unNumber: 'UN0009', cansPerCase: 0, neqGramsPerRound: 2400.0,
   },
   {
     key: '155mm', label: '155 mm Obüs',
     roundsPerCase: 2, lengthCm: 120, widthCm: 60, heightCm: 40,
     grossWeightKg: 110, hazardClass: '1.1D',
+    unNumber: 'UN0009', cansPerCase: 0, neqGramsPerRound: 11300.0,
   },
 ];
 
@@ -175,6 +208,8 @@ export function LogisticsCalculator() {
       caseHeightCm: product.caseHeightCm ? String(product.caseHeightCm) : '25',
       caseWeightKg: product.caseWeightKg ? String(product.caseWeightKg) : '20',
       hazardClass: product.hazardClass ?? null,
+      unNumber: product.unNumber ?? null,
+      neqGramsPerRound: product.neqGrams ? String(product.neqGrams) : '0',
     });
   };
 
@@ -191,16 +226,115 @@ export function LogisticsCalculator() {
       caseHeightCm: String(preset.heightCm),
       caseWeightKg: String(preset.grossWeightKg),
       hazardClass: preset.hazardClass,
+      unNumber: preset.unNumber,
+      cansPerCase: String(preset.cansPerCase),
+      neqGramsPerRound: String(preset.neqGramsPerRound),
     });
   };
 
   const container = CONTAINERS.find((c) => c.code === containerCode) ?? CONTAINERS[0]!;
 
+  /**
+   * Sevkiyat dökümünü kurumsal antetli A4 sayfasında yazdırır.
+   *
+   * Tarayıcının kendi yazdırma motoru kullanılır; PDF üretmek için ek bir
+   * bağımlılık (Puppeteer ~300 MB) kurmak gerekmez. Kullanıcı yazdırma
+   * penceresinden "PDF olarak kaydet" seçebilir.
+   */
+  const printDispatchSheet = (): void => {
+    const lines = rows.filter((row) => (Number(row.quantity) || 0) > 0);
+
+    printCorporateDocument({
+      documentType: 'SEVKİYAT DÖKÜMÜ',
+      documentNumber: `LOJ-${new Date().toISOString().slice(0, 10)}`,
+      title: 'Mühimmat Ambalaj ve Konteyner Planı',
+      classification: 'Hizmete Özel',
+      sections: [
+        {
+          heading: 'Yük Kalemleri',
+          table: {
+            headers: ['Kalem', 'Miktar', 'Sandık', 'Adet/Sandık', 'Brüt (kg)', 'UN / Sınıf'],
+            align: ['left', 'right', 'right', 'right', 'right', 'left'],
+            rows: lines.map((row) => {
+              const quantity = Number(row.quantity) || 0;
+              const perCase = Number(row.caseQuantity) || 1;
+              const cases = Math.ceil(quantity / perCase);
+              return [
+                row.name || '—',
+                quantity.toLocaleString('tr-TR'),
+                cases.toLocaleString('tr-TR'),
+                perCase.toLocaleString('tr-TR'),
+                Math.round(cases * (Number(row.caseWeightKg) || 0)).toLocaleString('tr-TR'),
+                [row.unNumber, row.hazardClass].filter(Boolean).join(' / ') || '—',
+              ];
+            }),
+          },
+        },
+        {
+          heading: 'Ambalaj Özeti',
+          rows: [
+            ['Toplam sandık', result.totalCases.toLocaleString('tr-TR')],
+            ...(result.totalCans > 0
+              ? [['M2A1 metal kutu', result.totalCans.toLocaleString('tr-TR')] as [string, string]]
+              : []),
+            ['Palet (120×80 cm)', result.palletCount.toLocaleString('tr-TR')],
+            ['Toplam hacim', `${result.totalVolumeM3.toFixed(2)} m³`],
+            ['Net yük ağırlığı', `${Math.round(result.totalWeightKg).toLocaleString('tr-TR')} kg`],
+            ['Palet darası', `${Math.round(result.palletTareKg).toLocaleString('tr-TR')} kg`],
+            ['Brüt ağırlık', `${Math.round(result.grossWeightKg).toLocaleString('tr-TR')} kg`],
+            ...(result.totalNeqKg > 0
+              ? [['Net patlayıcı ağırlığı (NEQ)',
+                `${result.totalNeqKg.toFixed(1)} kg`] as [string, string]]
+              : []),
+            ...(result.unNumbers.length > 0
+              ? [['BM madde numarası', result.unNumbers.join(', ')] as [string, string]]
+              : []),
+            ...(result.hazards.length > 0
+              ? [['Tehlike sınıfı', result.hazards.join(', ')] as [string, string]]
+              : []),
+          ],
+        },
+        {
+          heading: 'Konteyner Planı',
+          rows: [
+            ['Konteyner tipi', container.label],
+            ['Gereken konteyner', String(result.containersNeeded)],
+            ['Belirleyici kısıt', result.limiting],
+            ['Hacim doluluğu', `%${result.volumeFill.toFixed(1)}`],
+            ['Ağırlık doluluğu', `%${result.weightFill.toFixed(1)}`],
+            ['Hacme göre', `${result.byVolume} konteyner`],
+            ['Ağırlığa göre', `${result.byWeight} konteyner`],
+            ['Palet alanına göre', `${result.byPallet} konteyner`],
+          ],
+        },
+        {
+          heading: 'Açıklama',
+          paragraphs: [
+            'Ambalaj değerleri NATO standart ambalajı için yaklaşık kabul '
+            + 'edilmiştir. Kesin sevkiyat planı üreticinin teknik veri '
+            + 'sayfasındaki sandık ölçüsü ve brüt ağırlığa göre yapılmalıdır.',
+            'Gereken konteyner sayısı hacim, ağırlık ve palet alanı '
+            + 'kısıtlarından EN BÜYÜĞÜ esas alınarak bulunmuştur. Tehlikeli '
+            + 'madde ayrıştırma (IMDG/ADR) kuralları bu hesaba dahil değildir.',
+          ],
+        },
+      ],
+      signatures: [
+        { label: 'Hazırlayan' },
+        { label: 'Lojistik Onayı' },
+      ],
+      footerNote: 'MKE A.Ş. — Bu döküm bilgi amaçlıdır, resmî sevk irsaliyesi yerine geçmez.',
+    });
+  };
+
   const result = useMemo(() => {
     let totalCases = 0;
     let totalVolumeM3 = 0;
     let totalWeightKg = 0;
+    let totalCans = 0;
+    let totalNeqKg = 0;
     const hazards = new Set<string>();
+    const unNumbers = new Set<string>();
 
     for (const row of rows) {
       const quantity = Number(row.quantity) || 0;
@@ -217,7 +351,13 @@ export function LogisticsCalculator() {
       totalCases += cases;
       totalVolumeM3 += cases * caseVolumeM3;
       totalWeightKg += cases * (Number(row.caseWeightKg) || 0);
+      totalCans += cases * (Number(row.cansPerCase) || 0);
+      // NEQ sipariş ADEDİ üzerinden hesaplanır, sandık kapasitesi
+      // üzerinden değil: kısmi sandık dolu sayılırsa patlayıcı ağırlığı
+      // olduğundan fazla çıkar ve sevkiyat gereksiz yere sınıf atlar.
+      totalNeqKg += (quantity * (Number(row.neqGramsPerRound) || 0)) / 1000;
       if (row.hazardClass) hazards.add(row.hazardClass);
+      if (row.unNumber) unNumbers.add(row.unNumber);
     }
 
     // Palet: taban alanına kaç sandık sığdığı × istif kat sayısı.
@@ -262,6 +402,9 @@ export function LogisticsCalculator() {
       ? (grossWeightKg / (containersNeeded * container.payloadKg)) * 100 : 0;
 
     return {
+      totalCans,
+      totalNeqKg,
+      unNumbers: [...unNumbers],
       totalCases, totalVolumeM3, totalWeightKg, palletCount, palletTareKg,
       grossWeightKg, byVolume, byWeight, byPallet, containersNeeded, limiting,
       volumeFill, weightFill, hazards: [...hazards],
@@ -426,6 +569,13 @@ export function LogisticsCalculator() {
           <div className="calc-tile-label">Sandık / Koli</div>
           <div className="calc-tile-value">{result.totalCases.toLocaleString('tr-TR')}</div>
         </div>
+        {result.totalCans > 0 && (
+          <div className="calc-tile">
+            <div className="calc-tile-label">M2A1 Kutu</div>
+            <div className="calc-tile-value">{result.totalCans.toLocaleString('tr-TR')}</div>
+            <div className="calc-tile-sub">metal kutu (sandık içi)</div>
+          </div>
+        )}
         <div className="calc-tile">
           <div className="calc-tile-label">Palet</div>
           <div className="calc-tile-value">{result.palletCount.toLocaleString('tr-TR')}</div>
@@ -445,6 +595,19 @@ export function LogisticsCalculator() {
             kg (palet darası {Math.round(result.palletTareKg)} kg dahil)
           </div>
         </div>
+        {result.totalNeqKg > 0 && (
+          <div className="calc-tile" style={{ borderColor: 'var(--danger)' }}>
+            <div className="calc-tile-label">Net Patlayıcı (NEQ)</div>
+            <div className="calc-tile-value" style={{ color: 'var(--danger)' }}>
+              {result.totalNeqKg >= 1000
+                ? `${(result.totalNeqKg / 1000).toFixed(2)} t`
+                : `${result.totalNeqKg.toFixed(1)} kg`}
+            </div>
+            <div className="calc-tile-sub">
+              {result.unNumbers.length > 0 ? result.unNumbers.join(', ') : 'UN sınıfı girilmedi'}
+            </div>
+          </div>
+        )}
         <div className="calc-tile" style={{ borderColor: 'var(--mke-accent-dim)' }}>
           <div className="calc-tile-label">Konteyner</div>
           <div className="calc-tile-value" style={{ color: 'var(--mke-navy)' }}>
@@ -499,6 +662,16 @@ export function LogisticsCalculator() {
             </div>
           </div>
         </>
+      )}
+
+      {result.totalCases > 0 && (
+        <button
+          type="button"
+          className="btn btn-primary mt-3 mb-3"
+          onClick={printDispatchSheet}
+        >
+          <IconDownload size={14} /> Sevkiyat Dökümü (PDF / Yazdır)
+        </button>
       )}
 
       {result.hazards.length > 0 && (

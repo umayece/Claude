@@ -323,10 +323,22 @@ Uygulama MKE A.Ş. kurumsal kimlik kılavuzuna göre giydirilmiştir.
 
 | Rol | Değer | Kullanım |
 | --- | --- | --- |
-| Ana renk | `#002845` (Pantone 2965 C) | Sidebar, üst bar, birincil düğme, modal başlığı |
-| Vurgu | `#45B4AA` (Pantone 15-5519 TPX) | Aktif sekme, Kanban ilerleme çubuğu, rozet, CTA |
-| Zemin | `#F8FAFC` | Sayfa arka planı |
-| Çizgi | `#C4C7C8` (Pantone 428 C) | Kenarlık, ayraç |
+| Ana renk | `#0A192F` / `#0D1F3C` | Sidebar, üst bar, birincil düğme, modal başlığı |
+| Aksiyon | `#E31E24` (MKE Kırmızısı) | Aktif sekme, CTA, kritik rozet |
+| İkincil vurgu | `#C5A059` (Savunma bronzu) | Ayraç, seçili satır kenarı, filigran |
+| Zemin | `#F4F7F9` | Sayfa arka planı |
+| Çizgi | `#C4C7C8` | Kenarlık, ayraç |
+
+> **Palet değişikliği notu.** Önceki turda marka kılavuzundaki lacivert
+> `#002845` + turkuaz `#45B4AA` uygulanmıştı. Bu tur talep edilen
+> lacivert `#0A192F` + kırmızı `#E31E24` + bronz `#C5A059` şeması
+> yürürlüktedir; eski turkuaz değişkenleri geriye dönük takma ad olarak
+> korunmuş ve yeni palete yönlendirilmiştir.
+>
+> Kırmızı bu palette **vurgu** rengidir, "tehlike" rengi değil. Anlamı
+> renkten gelen yerler (bilgi rozeti mavi, tamamlanan iş yeşil, ilerleme
+> çubuğu yeşil) bilinçli olarak kendi rengini korur — aksi halde
+> "tamamlandı" işareti kırmızı görünür ve kullanıcı onu hata sanardı.
 
 **Tipografi.** Başlık, modül adı, KPI sayacı ve tablo sütun başlıkları
 **Barlow Condensed** (SemiBold/Bold, `--font-display`); form, tablo ve gövde
@@ -549,3 +561,116 @@ Hesap **hacim ve ağırlık** sınırlarını birlikte gözetir ve ikisinden
 **büyük** olanı gerekli konteyner sayısını belirler: mühimmatta genellikle
 konteyner hacmi dolmadan yük sınırına ulaşılır, yalnızca hacme bakan bir
 hesap gerçekte taşınamayacak bir plan üretir.
+
+
+---
+
+## Savunma sanayii dış ticaret modülü
+
+### Teslim şekli (Incoterms 2020)
+
+Teklif ve sözleşmede `incoterm` + `incotermPlace` alanları vardır. Liste
+`defenceTrade.service.ts` içinde tek yerde tanımlıdır ve hem Zod şemasını
+hem arayüz seçicisini besler. Teklif varsayılanı **FOB** — ihracatta en
+yaygın kullanılan şekil. Fark önemlidir: FOB ile CIF arasındaki navlun ve
+sigorta farkı bir teklifte yüzde onları bulabilir.
+
+### İhracat izni ve Son Kullanıcı Belgesi (EUC)
+
+Sözleşmede `exportLicenceStatus`, `exportLicenceAuthority` (MSB / SSB /
+Dışişleri / Ticaret), izin numarası, başvuru ve geçerlilik tarihleri ile
+`eucStatus`, `eucAuthority`, `eucReference` alanları tutulur.
+
+`exportGate()` bu alanlardan **sevkiyat hazırlık durumunu** türetir ve
+sözleşme detayında rozet olarak görünür:
+
+| Durum | Anlam |
+| --- | --- |
+| `HAZIR` | İzin onaylı, EUC tamam — sevk edilebilir |
+| `BEKLIYOR` | İzin veya EUC süreci devam ediyor |
+| `ENGELLI` | İzin reddedildi ya da süresi doldu — sevkiyat hukuken mümkün değil |
+| `GEREKSIZ` | İzne tabi değil (yurt içi) |
+
+Kural sırası önemlidir: **reddedildi** ve **süresi doldu** her şeyin önüne
+geçer. EUC eksikliği "bekliyor"dur, çünkü süreç devam edebilir.
+
+Sözleşme PDF'inde izne tabi sözleşmeler için ayrı bir "İhracat Kontrolü ve
+Son Kullanıcı Beyanı" bölümü ve yeniden ihraç taahhüdü maddesi basılır.
+Yurt içi sözleşmede bu bölüm hiç görünmez — boş bir "izin" başlığı kafa
+karıştırırdı.
+
+### Ürün sınıflandırması
+
+`Product` modelinde `nsn` (NATO Stok Numarası, 13 hane),
+`militaryListCategory` (ör. ML3), `unNumber` (ör. UN0012), `hazardClass`
+(BM Sınıf 1.1–1.6), `neqGrams` (birim başına net patlayıcı ağırlığı) ve
+`requiresExportLicence` alanları vardır. Ambalaj alanları (sandık adedi,
+ölçü, brüt ağırlık) da artık API'ye açıktır ve lojistik hesaplayıcı
+katalogdan doğrudan okur.
+
+---
+
+## Etiketler
+
+Etiketler önceden `customFields` JSON alanının içinde serbest metindi; bu
+yüzden "bu etikete sahip kayıtlar" sorgusu yazılamıyor, etiket yeniden
+adlandırılamıyor ve bir kayıttan merkezî olarak kaldırılamıyordu.
+
+Artık ilişkiseldir: `Tag` + `CompanyTag` + `ContactTag`. `/tags` ekranında
+bir etikete tıklayınca o etiketi taşıyan kurum ve kişiler sağda listelenir
+ve her satırdaki **"Etiketi Kaldır"** düğmesiyle bağ koparılır — kaydın
+kendi sayfasına gitmeye gerek yoktur.
+
+Kurum kapsamı etiket ekranında da uygulanır: kullanıcı erişemediği bir
+kurumu etiket üzerinden göremez, aksi halde etiket sayfası bir yan kanal
+olurdu.
+
+---
+
+## Mühimmat lojistik hesabı (genişletilmiş)
+
+Kalibre ön tanımları: 9x19, 5.56x45, 7.62x51, **7.62x39**, 12.7x99, 40 mm,
+81 mm, 120 mm, 155 mm. Her ön tanım sandık adedi, ölçü, brüt ağırlık,
+BM madde numarası, tehlike sınıfı, **M2A1 metal kutu adedi** ve birim
+başına **NEQ** taşır.
+
+Hesap çıktısı: sandık adedi, M2A1 kutu adedi, palet adedi, toplam hacim,
+brüt ağırlık, **net patlayıcı ağırlığı (NEQ)** ve 20FT/40FT/40HC konteyner
+doluluk oranı. **"Sevkiyat Dökümü (PDF / Yazdır)"** düğmesi kurumsal
+antetli A4 döküm üretir.
+
+İki ölçüm kararı:
+
+- Konteyner sayısı hacim, ağırlık ve palet alanı kısıtlarından **en
+  büyüğü** alınarak bulunur; mühimmatta genellikle hacim dolmadan yük
+  sınırına ulaşılır.
+- NEQ sipariş **adedi** üzerinden hesaplanır, sandık kapasitesi üzerinden
+  değil. Kısmi sandık dolu sayılsaydı patlayıcı ağırlığı olduğundan fazla
+  çıkar ve sevkiyat gereksiz yere tehlike sınıfı atlardı.
+
+> Ambalaj değerleri NATO standart ambalajı için **yaklaşıktır**. Kesin
+> plan üreticinin teknik veri sayfasına göre yapılmalıdır; tüm alanlar
+> arayüzden düzeltilebilir.
+
+---
+
+## Yerel AI motoru (anahtarsız)
+
+API anahtarı tanımlı değilken `localAnswer.service.ts` soruyu sınıflandırıp
+yanıtı **doğrudan veritabanından** üretir; dışarıya hiçbir veri gitmez.
+Bu tur eklenen niyetler:
+
+| Soru | Yanıt |
+| --- | --- |
+| "en büyük iş kimle", "en yüksek cirolu sözleşme" | En yüksek tutarlı sözleşme ve fırsat, şirket adı / tutar / sözleşme no / tarih ile |
+| "hangi ülkelere satıyoruz", "yurt dışı müşteriler" | Ülke bazında kurum sayısı ve toplam hacim |
+| "geciken teslimatlar", "yaklaşan termin" | Gecikmiş ve 30 gün içinde terminlenen siparişler |
+| "ihracat izni durumu", "EUC bekleyenler" | İzin durumuna göre gruplanmış sözleşmeler |
+
+Niyet sırası önemlidir: dar niyetler (en büyük iş, termin, izin) genel
+niyetlerden (fırsat, ciro) **önce** eşleşir; aksi halde "en büyük iş kimle"
+sorusu genel fırsat toplamına düşerdi.
+
+"En büyük iş" sıralaması ham `amount` ile yapılmaz — aday küme **anlık
+kurla TL'ye çevrilip** sıralanır; aksi halde 100.000 TRY, 90.000 USD'nin
+üstüne çıkardı.

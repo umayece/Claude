@@ -50,7 +50,25 @@ const STYLES = `
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 
-  .sheet { max-width: 190mm; margin: 0 auto; }
+  .sheet { max-width: 190mm; margin: 0 auto; position: relative; }
+
+  /*
+     Resmî evrak filigranı.
+
+     position: fixed kullanılır ki ÇOK SAYFALI çıktıda her sayfada
+     görünsün; absolute olsaydı yalnızca ilk sayfaya basılırdı.
+     Opaklık %4: metni okunaksız kılmadan evrakın kurumsal olduğunu
+     belli eder.
+  */
+  .watermark {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(-28deg);
+    font-size: 96pt; font-weight: 900; letter-spacing: 12px;
+    color: #0A192F; opacity: 0.04;
+    z-index: 0; pointer-events: none; white-space: nowrap;
+  }
+  .sheet > *:not(.watermark) { position: relative; z-index: 1; }
 
   /* --- Antet --- */
   .letterhead {
@@ -59,7 +77,7 @@ const STYLES = `
   }
   .logo {
     width: 58px; height: 58px; border-radius: 10px; flex-shrink: 0;
-    background: linear-gradient(135deg, #9b1b30 0%, #c0304a 100%);
+    background: linear-gradient(135deg, #E31E24 0%, #B8171C 100%);
     color: #fff; display: flex; align-items: center; justify-content: center;
     font-weight: 800; font-size: 17px; letter-spacing: 1px;
   }
@@ -69,7 +87,9 @@ const STYLES = `
   .doc-stamp { text-align: right; font-size: 8.5pt; color: #5b6676; }
   .doc-stamp strong { display: block; font-size: 11pt; color: #0a192f; }
 
-  .crimson-rule { height: 3px; background: #9b1b30; margin-bottom: 18px; }
+  /* Kırmızı ana ayraç + altın ince şerit: kurumsal antet imzası. */
+  .crimson-rule { height: 3px; background: #E31E24; margin-bottom: 2px; }
+  .gold-rule { height: 1px; background: #C5A059; margin-bottom: 18px; }
 
   .classification {
     display: inline-block; border: 1.5px solid #b91c1c; color: #b91c1c;
@@ -96,7 +116,7 @@ const STYLES = `
   }
   .party-label {
     font-size: 8pt; font-weight: 800; text-transform: uppercase;
-    letter-spacing: 0.6px; color: #9b1b30; margin-bottom: 4px;
+    letter-spacing: 0.6px; color: #E31E24; margin-bottom: 4px;
   }
   .party-name { font-weight: 700; font-size: 11pt; margin-bottom: 4px; }
   .party-line { font-size: 9pt; color: #374151; }
@@ -178,6 +198,9 @@ export function printCorporateDocument(input: PrintDocument): boolean {
 
   // --- Antet ---
   const letterhead = el(doc, 'div', 'letterhead');
+  // Filigran ilk düğüm: arkada kalmalı.
+  sheet.appendChild(el(doc, 'div', 'watermark', 'MKE A.Ş.'));
+
   letterhead.appendChild(el(doc, 'div', 'logo', 'MKE'));
 
   const org = el(doc, 'div', 'org');
@@ -195,6 +218,7 @@ export function printCorporateDocument(input: PrintDocument): boolean {
 
   sheet.appendChild(letterhead);
   sheet.appendChild(el(doc, 'div', 'crimson-rule'));
+  sheet.appendChild(el(doc, 'div', 'gold-rule'));
 
   if (input.classification) {
     sheet.appendChild(el(doc, 'div', 'classification', input.classification));

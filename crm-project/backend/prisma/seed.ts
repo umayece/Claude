@@ -804,6 +804,7 @@ async function main(): Promise<void> {
   await seedProtocolVisits(companyIndex, userIndex);
   await seedStandaloneContacts();
   await seedActivities(userIndex);
+  await seedTags();
 
   console.log('\n✅ Tamamlandı.');
 }
@@ -999,6 +1000,62 @@ async function seedActivities(userIndex: Map<string, string>): Promise<void> {
   }
 
   console.log(`  • ${created} aktivite/fuar kaydı`);
+}
+
+/**
+ * Örnek etiketler ve bağları.
+ *
+ * Etiket sayfasının boş görünmemesi için birkaç gerçekçi pazar/segment
+ * etiketi açılır ve mevcut kurumlara dağıtılır.
+ */
+async function seedTags(): Promise<void> {
+  const definitions = [
+    { name: 'Körfez Pazarı', color: '#C5A059', description: 'BAE, Katar, Suudi Arabistan, Kuveyt' },
+    { name: 'Stratejik Müşteri', color: '#E31E24', description: 'Üst yönetim takibinde olan hesaplar' },
+    { name: 'NATO Tedarik Zinciri', color: '#0A192F', description: 'NATO standartlarında tedarik' },
+    { name: 'Uzun Vadeli Sözleşme', color: '#15803d', description: 'Çok yıllı çerçeve anlaşmalar' },
+    { name: 'İzin Takibi', color: '#b45309', description: 'İhracat izni süreci devam eden hesaplar' },
+  ];
+
+  const tags = [];
+  for (const definition of definitions) {
+    const tag = await prisma.tag.upsert({
+      where: { name: definition.name },
+      create: definition,
+      update: {},
+    });
+    tags.push(tag);
+  }
+
+  const companies = await prisma.company.findMany({
+    where: { deletedAt: null },
+    select: { id: true, countryCode: true, type: true },
+    take: 200,
+  });
+
+  let links = 0;
+  for (const [index, company] of companies.entries()) {
+    const assigned: string[] = [];
+
+    // Yurt dışı kurumlar pazar etiketini, yurt içi B2G'ler NATO etiketini alır.
+    if (company.countryCode !== 'TR') assigned.push('Körfez Pazarı');
+    if (company.type === 'B2G' || company.type === 'G2G') assigned.push('NATO Tedarik Zinciri');
+    if (index % 5 === 0) assigned.push('Stratejik Müşteri');
+    if (index % 7 === 0) assigned.push('İzin Takibi');
+
+    for (const name of assigned) {
+      const tag = tags.find((t) => t.name === name);
+      if (!tag) continue;
+      await prisma.companyTag.upsert({
+        where: { companyId_tagId: { companyId: company.id, tagId: tag.id } },
+        create: { companyId: company.id, tagId: tag.id },
+        update: {},
+      });
+      links += 1;
+    }
+  }
+
+  console.log(`  • ${tags.length} etiket, ${links} etiket bağı`);
 }
 
 main()

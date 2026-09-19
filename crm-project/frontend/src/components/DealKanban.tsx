@@ -210,14 +210,16 @@ export function DealKanban({
                         ))}
                       </select>
 
+                      {/* Teklif kısayolu ikon değil ETİKETLİ düğme:
+                          simgeyle gösterildiğinde kullanıcılar bu adımı
+                          bulamıyordu. */}
                       <button
-                        type="button" className="btn btn-ghost btn-icon"
-                        style={{ width: 24, height: 24 }}
-                        title="Teklif oluştur"
-                        aria-label="Teklif oluştur"
+                        type="button" className="btn btn-accent btn-sm"
+                        style={{ padding: '3px 8px', fontSize: 11 }}
+                        title="Bu fırsattan teklif oluştur"
                         onClick={() => onCreateOffer(deal)}
                       >
-                        <IconFile size={13} />
+                        <IconFile size={12} /> Teklif
                       </button>
 
                       <button

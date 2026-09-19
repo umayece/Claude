@@ -59,6 +59,8 @@ interface FormState {
   country: string;
   countryCode: string;
   cityId: string | null;
+  /** Katalogda olmayan ülke için elle girilen ISO kodu. */
+  manualCountryCode: string;
   /** Listede olmayan (çoğunlukla yurt dışı) şehirler için serbest metin. */
   cityName: string;
   districtName: string;
@@ -72,7 +74,7 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   name: '', type: 'B2B', status: 'Potansiyel', sector: '', website: '', email: '',
   phone: '', taxNumber: '', taxOffice: '', address: '',
-  country: 'Türkiye', countryCode: 'TR', cityId: null, cityName: '',
+  country: 'Türkiye', countryCode: 'TR', manualCountryCode: '', cityId: null, cityName: '',
   districtName: '', latitude: '', longitude: '', notes: '', customFields: {},
 };
 
@@ -191,6 +193,7 @@ export function Companies() {
       address: company.address ?? '',
       country: company.country ?? 'Türkiye',
       countryCode: company.countryCode ?? 'TR',
+      manualCountryCode: '',
       cityId: company.cityId,
       cityName: company.cityName ?? '',
       districtName: company.districtName ?? '',
@@ -225,8 +228,12 @@ export function Companies() {
         taxNumber: form.taxNumber || null,
         taxOffice: form.taxOffice || null,
         address: form.address || null,
-        country: form.country,
-        countryCode: form.countryCode,
+        country: form.country.trim(),
+        // Elle girilen ülkede kod serbest alandan gelir; seçili ülkede
+        // katalogdan. Sunucu her iki durumda da 2 harf bekler.
+        countryCode: form.countryCode === '__manual__'
+          ? form.manualCountryCode.trim().toUpperCase()
+          : form.countryCode,
         // Şehir seçilmişse koordinat ve ülke sunucuda o kayıttan türetilir.
         // Elle koordinat girildiyse sunucu onu ezmez — şehir listesinde
         // olmayan yurt dışı lokasyonlar böylece haritaya düşer.
@@ -530,10 +537,13 @@ export function Companies() {
                 const next = countries.find((c) => c.countryCode === event.target.value);
                 // Ülke değişince şehir seçimi sıfırlanır: başka ülkenin
                 // şehri seçili kalırsa koordinat ve ülke çelişir.
+                const manual = event.target.value === '__manual__';
                 setForm((prev) => ({
                   ...prev,
                   countryCode: event.target.value,
-                  country: next?.country ?? prev.country,
+                  // Elle girişe geçerken ülke adı boşaltılır ki kullanıcı
+                  // önceki ülkenin adını yanlışlıkla kaydetmesin.
+                  country: manual ? '' : next?.country ?? prev.country,
                   cityId: null,
                 }));
               }}
@@ -548,8 +558,46 @@ export function Companies() {
                   {option.country}
                 </option>
               ))}
+              {/* Ülke kataloğu yalnızca şehir kaydı OLAN ülkeleri içerir.
+                  Hiç şehri olmayan bir pazara (ör. ilk kez girilen bir
+                  ülke) kayıt açabilmek için elle giriş şart. */}
+              <option value="__manual__">— Listede yok (elle gir) —</option>
             </select>
           </div>
+
+          {form.countryCode === '__manual__' && (
+            <>
+              <div className="field">
+                <label className="field-label" htmlFor="c-country-manual">
+                  Ülke Adı<span className="req">*</span>
+                </label>
+                <input
+                  id="c-country-manual" className="input" value={form.country}
+                  placeholder="Kazakistan"
+                  onChange={(event) => setForm((prev) => ({
+                    ...prev, country: event.target.value,
+                  }))}
+                />
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="c-cc-manual">
+                  Ülke Kodu (ISO 3166, 2 harf)<span className="req">*</span>
+                </label>
+                <input
+                  id="c-cc-manual" className="input mono" maxLength={2}
+                  value={form.manualCountryCode}
+                  placeholder="KZ"
+                  onChange={(event) => setForm((prev) => ({
+                    ...prev, manualCountryCode: event.target.value.toUpperCase(),
+                  }))}
+                />
+                <div className="field-hint">
+                  Harita filtreleri ve yurt içi/yurt dışı ayrımı bu kodu kullanır.
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="field">
             <label className="field-label" htmlFor="c-city">Şehir</label>

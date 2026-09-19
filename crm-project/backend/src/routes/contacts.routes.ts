@@ -121,6 +121,7 @@ type ContactBody = z.infer<typeof contactFieldsSchema>;
 const contactInclude = {
   company: { select: { id: true, name: true, type: true } },
   phones: { orderBy: [{ isInactive: 'asc' }, { isPrimary: 'desc' }, { createdAt: 'asc' }] },
+  tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
 } satisfies Prisma.ContactInclude;
 
 const listQuerySchema = z.object({
@@ -222,6 +223,9 @@ router.get(
           { departmentName: { contains: query.q, mode: 'insensitive' } },
           { cityName: { contains: query.q, mode: 'insensitive' } },
           { country: { contains: query.q, mode: 'insensitive' } },
+          // Şirket adıyla arama: "Aselsan" yazan kullanıcı o kurumun
+          // kişilerini görmeyi bekler.
+          { company: { name: { contains: query.q, mode: 'insensitive' } } },
           // Kullanım dışı numaralar da eşleşir (isInactive filtresi YOK).
           ...(digits.length >= 3
             ? [{ phones: { some: { normalizedNumber: { contains: digits } } } }]

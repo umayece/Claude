@@ -15,6 +15,9 @@ import {
 } from '../services/currency.service';
 import { nextSequence } from '../services/sequence.service';
 import { deliveryInfo } from '../services/delivery.service';
+import {
+  EUC_STATUSES, EXPORT_LICENCE_STATUSES, exportGate, INCOTERM_CODES,
+} from '../services/defenceTrade.service';
 
 /** Zaman tüneli notu için kısa tarih; boşsa "—". */
 function formatDate(value: Date | null): string {
@@ -51,7 +54,56 @@ const contractBodySchema = z.object({
   cogs: z.number().min(0).max(1e15).nullish(),
   cogsCurrency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
   cogsNote: z.string().max(2000).nullish(),
+
+  // --- Teslim şekli ---
+  incoterm: z.enum(INCOTERM_CODES).nullish(),
+  incotermPlace: z.string().trim().max(200).nullish(),
+
+  // --- İhracat kontrolü ---
+  eucStatus: z.enum(EUC_STATUSES).default('Gerekli Değil'),
+  eucAuthority: z.string().trim().max(200).nullish(),
+  eucReference: z.string().trim().max(120).nullish(),
+  eucReceivedAt: z.coerce.date().nullish(),
+
+  exportLicenceStatus: z.enum(EXPORT_LICENCE_STATUSES).default('Başvurulmadı'),
+  exportLicenceAuthority: z.string().trim().max(200).nullish(),
+  exportLicenceNumber: z.string().trim().max(120).nullish(),
+  exportLicenceAppliedAt: z.coerce.date().nullish(),
+  exportLicenceIssuedAt: z.coerce.date().nullish(),
+  exportLicenceExpiresAt: z.coerce.date().nullish(),
+  exportLicenceNote: z.string().trim().max(2000).nullish(),
+
+  stockReserved: z.boolean().default(false),
+  stockNote: z.string().trim().max(2000).nullish(),
 });
+
+/** Gövdedeki savunma ticareti alanlarını Prisma `data` nesnesine çevirir. */
+function defenceFields(body: Partial<z.infer<typeof contractBodySchema>>) {
+  return {
+    ...(body.incoterm !== undefined ? { incoterm: body.incoterm } : {}),
+    ...(body.incotermPlace !== undefined ? { incotermPlace: body.incotermPlace } : {}),
+    ...(body.eucStatus !== undefined ? { eucStatus: body.eucStatus } : {}),
+    ...(body.eucAuthority !== undefined ? { eucAuthority: body.eucAuthority } : {}),
+    ...(body.eucReference !== undefined ? { eucReference: body.eucReference } : {}),
+    ...(body.eucReceivedAt !== undefined ? { eucReceivedAt: body.eucReceivedAt } : {}),
+    ...(body.exportLicenceStatus !== undefined
+      ? { exportLicenceStatus: body.exportLicenceStatus } : {}),
+    ...(body.exportLicenceAuthority !== undefined
+      ? { exportLicenceAuthority: body.exportLicenceAuthority } : {}),
+    ...(body.exportLicenceNumber !== undefined
+      ? { exportLicenceNumber: body.exportLicenceNumber } : {}),
+    ...(body.exportLicenceAppliedAt !== undefined
+      ? { exportLicenceAppliedAt: body.exportLicenceAppliedAt } : {}),
+    ...(body.exportLicenceIssuedAt !== undefined
+      ? { exportLicenceIssuedAt: body.exportLicenceIssuedAt } : {}),
+    ...(body.exportLicenceExpiresAt !== undefined
+      ? { exportLicenceExpiresAt: body.exportLicenceExpiresAt } : {}),
+    ...(body.exportLicenceNote !== undefined
+      ? { exportLicenceNote: body.exportLicenceNote } : {}),
+    ...(body.stockReserved !== undefined ? { stockReserved: body.stockReserved } : {}),
+    ...(body.stockNote !== undefined ? { stockNote: body.stockNote } : {}),
+  };
+}
 
 const milestoneBodySchema = z.object({
   title: z.string().trim().min(2).max(200),
@@ -157,6 +209,7 @@ router.get(
             originalDeliveryDate: contract.originalDeliveryDate,
             deliveredAt: contract.deliveredAt,
           }),
+          exportGate: exportGate(contract),
         })),
         total,
         page,
@@ -233,6 +286,8 @@ router.get(
         originalDeliveryDate: contract.originalDeliveryDate,
         deliveredAt: contract.deliveredAt,
       }),
+      // Sevkiyat yapılabilir mi? İzin ve EUC durumundan türer.
+      exportGate: exportGate(contract),
       stockLines,
       // İmza tarihindeki değer ile güncel piyasa değeri birlikte döner.
       ...dualValue(contract.amount, contract.currency, contract.exchangeRateAtCreation, rates),
@@ -285,6 +340,7 @@ router.post(
         cogs: body.cogs ?? null,
         cogsCurrency: body.cogsCurrency,
         cogsNote: body.cogsNote ?? null,
+        ...defenceFields(body),
       },
       include: contractInclude,
     });
@@ -362,6 +418,7 @@ router.put(
         ...(body.cogs !== undefined ? { cogs: body.cogs } : {}),
         ...(body.cogsCurrency !== undefined ? { cogsCurrency: body.cogsCurrency } : {}),
         ...(body.cogsNote !== undefined ? { cogsNote: body.cogsNote } : {}),
+        ...defenceFields(body),
       },
       include: contractInclude,
     });

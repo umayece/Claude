@@ -4,26 +4,42 @@
    ========================================================================== */
 
 :root {
-  /* --- MKE Marka Kimlik Kılavuzu --- */
-  /* Ana renk — Pantone 2965 C */
-  --mke-navy: #002845;
-  --mke-navy-soft: #013a61;
-  --mke-navy-deep: #001c30;
-  --mke-navy-line: #124b74;
-  /* Vurgu — MKE Turkuaz, Pantone 15-5519 TPX */
-  --mke-teal: #45B4AA;
-  --mke-teal-dark: #2f9990;
-  --mke-teal-soft: rgba(69, 180, 170, 0.12);
-  --mke-teal-mid: rgba(69, 180, 170, 0.22);
-  /* Nötr çelik — Pantone 428 C */
+  /* --- MKE Kurumsal Renk Standardı --- */
+  /* Derin askeri lacivert: sidebar, üst bar, birincil düğme, modal başlığı */
+  --mke-navy: #0A192F;
+  --mke-navy-soft: #13294B;
+  --mke-navy-deep: #060F1E;
+  --mke-navy-line: #1E3A5F;
+  /* Panel içi ikinci lacivert ton (kart üstü koyu yüzeyler) */
+  --mke-navy-panel: #0D1F3C;
+
+  /* Aksiyon rengi — MKE Kırmızısı. Yıkıcı değil, VURGU rengidir:
+     aktif sekme, birincil CTA, kritik rozet. */
+  --mke-red: #E31E24;
+  --mke-red-dark: #B8171C;
+  --mke-red-soft: rgba(227, 30, 36, 0.10);
+  --mke-red-mid: rgba(227, 30, 36, 0.20);
+
+  /* Savunma sanayii bronz/altın — ikincil vurgu: madalya şeritleri,
+     seçili satır kenarı, kurumsal ayraç. */
+  --mke-gold: #C5A059;
+  --mke-gold-dark: #A9853F;
+  --mke-gold-soft: rgba(197, 160, 89, 0.14);
+
+  /* Nötr çelik ve kurumsal antrasit */
   --mke-steel: #C4C7C8;
   --mke-anthracite: #2E3A44;
 
-  /* Geriye dönük takma adlar */
-  --mke-accent: var(--mke-teal);
-  --mke-accent-dim: var(--mke-teal-dark);
-  --mke-crimson: #9b1b30;
-  --mke-crimson-soft: #c0304a;
+  /* Geriye dönük takma adlar — eski turkuaz değişkenleri hâlâ
+     referans veren kurallar kırmızı/altın şemaya yönlendirilir. */
+  --mke-teal: var(--mke-red);
+  --mke-teal-dark: var(--mke-red-dark);
+  --mke-teal-soft: var(--mke-red-soft);
+  --mke-teal-mid: var(--mke-red-mid);
+  --mke-accent: var(--mke-red);
+  --mke-accent-dim: var(--mke-red-dark);
+  --mke-crimson: var(--mke-red);
+  --mke-crimson-soft: var(--mke-red-dark);
 
   /* Zemin ve yüzeyler.
      Çalışma alanı dümdüz beyaz değil, ferah bir buz mavisi-gri: beyaz
@@ -69,10 +85,10 @@
   /* Katmanlı, yumuşak gölgeler — tek sert gölge yerine iki katman:
      yakın kontur + geniş dağılım. Kartlar zeminden "kalkık" durur. */
   --shadow-sm: 0 1px 2px rgba(0, 40, 69, 0.03), 0 2px 10px -3px rgba(0, 40, 69, 0.05);
-  --shadow-md: 0 4px 24px -2px rgba(0, 40, 69, 0.05);
+  --shadow-md: 0 4px 14px 0 rgba(0, 0, 0, 0.05);
   --shadow-raise: 0 8px 30px -4px rgba(0, 40, 69, 0.10);
   --shadow-lg: 0 8px 12px -4px rgba(0, 40, 69, 0.08), 0 24px 56px -8px rgba(0, 40, 69, 0.18);
-  --shadow-focus: 0 0 0 3px rgba(69, 180, 170, 0.28);
+  --shadow-focus: 0 0 0 3px rgba(227, 30, 36, 0.22);
 
   --sidebar-w: 252px;
   --topbar-h: 62px;
@@ -1413,3 +1429,192 @@ tr:hover .row-actions { opacity: 1; }
   font-family: var(--font-display); font-size: 13px; font-weight: 600;
   color: var(--mke-navy); white-space: nowrap; flex-shrink: 0;
 }
+
+/* ==========================================================================
+   MKE kurumsal kimlik — anlamsal düzeltmeler
+   --------------------------------------------------------------------------
+   Kırmızı bu palette VURGU rengidir, "tehlike" rengi değil. Geriye dönük
+   takma adlar bazı kuralları otomatik kırmızıya çevirdiği için, anlamı
+   renkten gelen yerler (bilgi rozeti, tamamlanmış görev, ilerleme çubuğu)
+   burada kendi doğru rengine geri alınır. Aksi halde "tamamlandı" işareti
+   kırmızı görünür ve kullanıcı onu hata sanardı.
+   ========================================================================== */
+
+/* Sidebar aktif sekmesi: kırmızı buton + beyaz metin + altın sol şerit.
+   Lacivert metin kırmızı üzerinde okunmaz; beyaz kontrastı karşılar. */
+.nav-item.active,
+.nav-item.active:hover {
+  background: var(--mke-red);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--mke-gold), 0 2px 10px -2px rgba(227, 30, 36, 0.5);
+}
+.nav-item.active svg { color: #ffffff; opacity: 1; }
+
+/* Üst barın altında ince altın kurumsal ayraç. */
+.topbar { border-bottom: 1px solid var(--mke-navy-line); box-shadow: 0 1px 0 var(--mke-gold-soft); }
+
+/* Bilgi rozeti mavidir: kırmızı olursa "hata" gibi okunur. */
+.badge-info { background: var(--info-bg); color: var(--info); }
+
+/* Tamamlanan iş yeşildir. */
+.checklist-item.done .checklist-box {
+  background: var(--success); border-color: var(--success); color: #ffffff;
+}
+.progress-fill { background: var(--success); }
+.funnel-conv { color: var(--info); }
+
+/* Tablo satırı üzerine gelince sol kenarda altın ipucu. */
+.table tbody tr:hover { background: var(--row-hover); box-shadow: inset 3px 0 0 var(--mke-gold); }
+
+/* Birincil düğme lacivert kalır; kırmızı düğme "aksiyon" CTA'sıdır. */
+.btn-accent {
+  background: var(--mke-red); border-color: var(--mke-red); color: #ffffff;
+}
+.btn-accent:hover:not(:disabled) {
+  background: var(--mke-red-dark); border-color: var(--mke-red-dark); color: #ffffff;
+}
+
+/* Giriş ekranı rozeti: lacivert zemin üzerinde altın çerçeveli kırmızı. */
+.login-brand-mark {
+  background: linear-gradient(135deg, var(--mke-red) 0%, var(--mke-red-dark) 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 2px var(--mke-gold-soft);
+}
+
+/* KPI sayacının altında ince altın çizgi — kurumsal rapor hissi. */
+.kpi { border-top: 2px solid transparent; }
+.kpi:hover { border-top-color: var(--mke-gold); }
+
+/* Harita ve Kanban vurguları kırmızıya değil altına çekilir:
+   kırmızı orada "kayıp/gecikme" anlamıyla çakışırdı. */
+.kanban-column.drop-target {
+  background: var(--mke-gold-soft);
+  box-shadow: inset 0 0 0 2px var(--mke-gold);
+}
+.map-filter-btn.active { background: var(--mke-navy); color: #ffffff; }
+.drawer-tab.active { color: var(--mke-navy); border-bottom-color: var(--mke-red); }
+.view-toggle button.active { color: var(--mke-navy); }
+
+/* Sidebar markası: MKE rozeti */
+.sidebar-brand-mark {
+  background: linear-gradient(135deg, var(--mke-red) 0%, var(--mke-red-dark) 100%) !important;
+  color: #ffffff !important;
+}
+.sidebar-badge {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--mke-gold);
+}
+
+/* Filigran altın tonuna döner — kırmızı filigran agresif durur. */
+.sidebar-watermark { color: var(--mke-gold); opacity: 0.07; }
+
+/* Mikro animasyonlar: düğme ve kart etkileşimleri yumuşak. */
+.btn { transition: background 0.16s var(--ease), border-color 0.16s var(--ease),
+  transform 0.08s ease, box-shadow 0.16s var(--ease); }
+.btn-primary:hover:not(:disabled) { box-shadow: 0 4px 12px -3px rgba(10, 25, 47, 0.45); }
+.btn-accent:hover:not(:disabled) { box-shadow: 0 4px 12px -3px rgba(227, 30, 36, 0.45); }
+
+/* Sevkiyat / ihracat izni durum rozetleri */
+.gate-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-display); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.6px; text-transform: uppercase;
+  padding: 3px 9px; border-radius: var(--radius-pill);
+}
+.gate-hazir { background: var(--success-bg); color: var(--success); }
+.gate-bekliyor { background: var(--warning-bg); color: var(--warning); }
+.gate-engelli { background: var(--danger-bg); color: var(--danger); }
+.gate-gereksiz { background: var(--surface-sunken); color: var(--text-muted); }
+
+/* ==========================================================================
+   Kurum detayındaki not kartları
+   ========================================================================== */
+
+.note-swatch {
+  width: 22px; height: 22px; border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12); cursor: pointer; padding: 0;
+  outline-offset: 2px;
+}
+
+.note-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+
+.note-card {
+  border-radius: var(--radius-sm);
+  padding: 12px 13px;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.note-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 13px;
+}
+.note-card-body {
+  margin: 0; font-size: 13px; line-height: 1.5; color: var(--mke-anthracite);
+  white-space: pre-wrap; word-break: break-word;
+}
+.note-card-meta { font-size: 10.5px; color: rgba(46, 58, 68, 0.6); margin-top: auto; }
+
+/* ==========================================================================
+   Etiket yönetimi
+   ========================================================================== */
+
+.tag-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .tag-layout { grid-template-columns: 1fr; }
+}
+
+.tag-list { padding: 6px; max-height: 68vh; overflow-y: auto; }
+
+.tag-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-radius: var(--radius-btn);
+  transition: background 0.14s var(--ease);
+}
+.tag-row:hover { background: var(--row-hover); }
+.tag-row.is-selected { background: var(--mke-gold-soft); box-shadow: inset 3px 0 0 var(--mke-gold); }
+
+.tag-row-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 7px 4px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; text-align: left;
+}
+
+.tag-chip {
+  display: inline-flex; align-items: center;
+  padding: 3px 11px; border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: 600; color: #ffffff;
+  /* Açık zeminli etiketlerde metin okunur kalsın diye hafif gölge. */
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.tag-row-counts {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; color: var(--text-muted); white-space: nowrap;
+}
+
+.tag-record-list { display: flex; flex-direction: column; gap: 6px; }
+
+.tag-record {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: var(--radius-btn);
+  background: var(--surface-alt);
+}
+.tag-record-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  border: 0; background: none; cursor: pointer; font-family: inherit;
+  text-align: left; padding: 0;
+}
+.tag-record-name { font-weight: 600; font-size: 13px; color: var(--text); }
+.tag-record-meta { font-size: 11.5px; color: var(--text-muted); }

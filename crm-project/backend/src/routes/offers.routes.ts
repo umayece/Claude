@@ -14,6 +14,7 @@ import {
   dualValue, getRateMap, shouldFreezeRate, SUPPORTED_CURRENCIES, toTryAt, type RateMap,
 } from '../services/currency.service';
 import { nextSequence } from '../services/sequence.service';
+import { INCOTERM_CODES } from '../services/defenceTrade.service';
 
 const router = Router();
 router.use(authenticate, requireMfaComplete);
@@ -45,6 +46,9 @@ const offerBodySchema = z.object({
   currency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
   /** Maliyet para birimi satış para biriminden farklı olabilir. */
   costCurrency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
+  /** Teslim şekli — fiyatın navlun/sigortayı kapsayıp kapsamadığını belirler. */
+  incoterm: z.enum(INCOTERM_CODES).nullish(),
+  incotermPlace: z.string().trim().max(200).nullish(),
   validUntil: z.coerce.date().nullish(),
   notes: z.string().max(5000).nullish(),
   terms: z.string().max(50_000).nullish(),
@@ -222,6 +226,8 @@ router.post(
         taxTotal: totals.taxTotal,
         costTotal: totals.costTotal,
         costCurrency: body.costCurrency,
+        incoterm: body.incoterm ?? null,
+        incotermPlace: body.incotermPlace ?? null,
         total: totals.total,
         validUntil: body.validUntil ?? null,
         notes: body.notes ?? null,
@@ -312,6 +318,8 @@ router.put(
             total: totals.total,
             costTotal: totals.costTotal,
             ...(body.costCurrency !== undefined ? { costCurrency: body.costCurrency } : {}),
+            ...(body.incoterm !== undefined ? { incoterm: body.incoterm } : {}),
+            ...(body.incotermPlace !== undefined ? { incotermPlace: body.incotermPlace } : {}),
           },
         });
       }

@@ -23,9 +23,30 @@ export interface AnswerScope {
 type Intent =
   | 'WEEK_EVENTS' | 'DEAL_TOTALS' | 'OVERDUE_TASKS' | 'TENDER_DEADLINES'
   | 'LOW_STOCK' | 'EXCHANGE_RATES' | 'COMPANY_STATS' | 'UPCOMING_VISITS'
-  | 'LOSS_ANALYSIS' | 'OVERVIEW' | 'UNKNOWN';
+  | 'LOSS_ANALYSIS' | 'BIGGEST_BUSINESS' | 'FOREIGN_MARKETS'
+  | 'DELIVERY_STATUS' | 'EXPORT_LICENCE' | 'OVERVIEW' | 'UNKNOWN';
 
+// Sıra ÖNEMLİDİR: ilk eşleşen kazanır. Daha dar niyetler (en büyük iş,
+// termin, ihracat izni) genel niyetlerden (fırsat, ciro) ÖNCE gelir;
+// aksi halde "en büyük iş kimle" sorusu 'DEAL_TOTALS'a düşerdi.
 const INTENT_KEYWORDS: [Intent, string[]][] = [
+  ['BIGGEST_BUSINESS', [
+    'en büyük iş', 'en buyuk is', 'en büyük satış', 'en yüksek cirolu',
+    'en yüksek tutarlı', 'en büyük sözleşme', 'en büyük müşteri',
+    'en karlı', 'en kârlı', 'kiminle en', 'en büyük anlaşma',
+  ]],
+  ['DELIVERY_STATUS', [
+    'termin', 'teslimat', 'geciken teslim', 'yaklaşan teslim',
+    'ne zaman teslim', 'sevkiyat tarihi',
+  ]],
+  ['EXPORT_LICENCE', [
+    'ihracat izni', 'ihracat lisans', 'euc', 'son kullanıcı belgesi',
+    'msb izni', 'ssb izni', 'sevkiyat izni', 'lisans durumu',
+  ]],
+  ['FOREIGN_MARKETS', [
+    'hangi ülke', 'yurtdışı', 'yurt dışı', 'yabancı müşteri',
+    'ihracat pazar', 'uluslararası müşteri', 'hangi ülkeler',
+  ]],
   ['WEEK_EVENTS', ['bu hafta', 'haftaki', 'takvim', 'etkinlik', 'ajanda', 'program']],
   ['OVERDUE_TASKS', ['gecikmiş', 'geciken', 'geciktir', 'bekleyen görev', 'açık görev']],
   ['TENDER_DEADLINES', ['ihale', 'teslim tarihi', 'son teklif', 'şartname']],
@@ -68,6 +89,10 @@ export async function answerLocally(question: string, scope: AnswerScope): Promi
     case 'COMPANY_STATS': return companyStats(scope);
     case 'UPCOMING_VISITS': return upcomingVisits();
     case 'LOSS_ANALYSIS': return lossAnalysis(scope);
+    case 'BIGGEST_BUSINESS': return biggestBusiness(scope);
+    case 'FOREIGN_MARKETS': return foreignMarkets(scope);
+    case 'DELIVERY_STATUS': return deliveryStatus(scope);
+    case 'EXPORT_LICENCE': return exportLicenceStatus(scope);
     case 'OVERVIEW': return overview(scope);
     default: return unknownIntent(question);
   }
@@ -403,6 +428,260 @@ async function overview(scope: AnswerScope): Promise<string> {
   ].join('\n');
 }
 
+/**
+ * "En büyük iş kimle?" — en yüksek tutarlı sözleşme ve fırsat.
+ *
+ * Karşılaştırma ANLIK kurla TL'ye çevrilerek yapılır; ham `amount`
+ * sıralaması 100.000 TRY'yi 90.000 USD'nin üstüne koyardı ve yanıt
+ * yanlış olurdu. Bu yüzden aday küme çekilip TL'ye çevrildikten sonra
+ * sıralanıyor.
+ */
+async function biggestBusiness(scope: AnswerScope): Promise<string> {
+  const rates = await getRateMap();
+  const where = { deletedAt: null, company: scope.companyWhere };
+
+  const [contracts, deals] = await Promise.all([
+    prisma.contract.findMany({
+      where,
+      // Kur farkı sıralamayı değiştirebileceği için tek kayıt değil,
+      // makul bir aday kümesi çekilir.
+      take: 50,
+      orderBy: { amount: 'desc' },
+      select: {
+        id: true, contractNumber: true, title: true, amount: true, currency: true,
+        startDate: true, status: true, deliveryDate: true,
+        company: { select: { id: true, name: true, country: true } },
+      },
+    }),
+    prisma.deal.findMany({
+      where: { ...where, stage: { notIn: ['Kaybedildi'] } },
+      take: 50,
+      orderBy: { amount: 'desc' },
+      select: {
+        id: true, title: true, amount: true, currency: true, stage: true,
+        expectedCloseDate: true,
+        company: { select: { id: true, name: true, country: true } },
+      },
+    }),
+  ]);
+
+  const rankedContracts = contracts
+    .map((c) => ({ ...c, try: toTryAt(c.amount, c.currency, rates) }))
+    .sort((a, b) => b.try - a.try);
+  const rankedDeals = deals
+    .map((d) => ({ ...d, try: toTryAt(d.amount, d.currency, rates) }))
+    .sort((a, b) => b.try - a.try);
+
+  const topContract = rankedContracts[0];
+  const topDeal = rankedDeals[0];
+
+  if (!topContract && !topDeal) {
+    return `${header('En Büyük İş')}Sistemde henüz sözleşme veya fırsat kaydı yok.`;
+  }
+
+  let out = header('En Büyük İş');
+
+  if (topContract) {
+    out += `**Sözleşme.** Sistemdeki en yüksek tutarlı sözleşme `
+      + `**${topContract.company?.name ?? 'bilinmeyen kurum'}** ile imzalanan `
+      + `**${topContract.amount.toLocaleString('tr-TR')} ${topContract.currency}** `
+      + `(≈ ${fmtTry(topContract.try)}) değerindeki sözleşmedir.\n`
+      + `- Sözleşme No: ${topContract.contractNumber}\n`
+      + `- Konu: ${topContract.title}\n`
+      + `- Başlangıç: ${fmtDate(topContract.startDate)}\n`
+      + `- Durum: ${topContract.status}\n`
+      + `- Ülke: ${topContract.company?.country ?? '-'}\n`
+      + (topContract.deliveryDate ? `- Termin: ${fmtDate(topContract.deliveryDate)}\n` : '')
+      + '\n';
+  }
+
+  if (topDeal) {
+    out += `**Fırsat.** En yüksek hacimli açık fırsat `
+      + `**${topDeal.company?.name ?? 'bilinmeyen kurum'}** nezdindeki `
+      + `**${topDeal.amount.toLocaleString('tr-TR')} ${topDeal.currency}** `
+      + `(≈ ${fmtTry(topDeal.try)}) değerindeki "${topDeal.title}" kaydıdır.\n`
+      + `- Aşama: ${topDeal.stage}\n`
+      + `- Beklenen kapanış: ${fmtDate(topDeal.expectedCloseDate)}\n\n`;
+  }
+
+  if (rankedContracts.length > 1) {
+    out += '**Takip eden sözleşmeler:**\n';
+    for (const row of rankedContracts.slice(1, 5)) {
+      out += `- ${row.company?.name ?? '-'} — ${fmtTry(row.try)} (${row.contractNumber})\n`;
+    }
+  }
+
+  out += '\n_Tutarlar bugünkü kurla TL karşılığına çevrilerek sıralanmıştır._';
+  return out;
+}
+
+/** Yurt dışı pazarlar: ülke bazında kurum sayısı ve hacim. */
+async function foreignMarkets(scope: AnswerScope): Promise<string> {
+  const rates = await getRateMap();
+
+  const companies = await prisma.company.findMany({
+    where: {
+      AND: [
+        { deletedAt: null },
+        scope.companyWhere as never,
+        { NOT: { countryCode: 'TR' } },
+      ],
+    },
+    select: {
+      id: true, name: true, country: true, countryCode: true, type: true,
+      deals: {
+        where: { deletedAt: null, stage: 'Kazanıldı' },
+        select: { amount: true, currency: true },
+      },
+      contracts: {
+        where: { deletedAt: null },
+        select: { amount: true, currency: true },
+      },
+    },
+    take: 500,
+  });
+
+  if (companies.length === 0) {
+    return `${header('Yurt Dışı Pazarlar')}Sistemde Türkiye dışında kayıtlı kurum bulunmuyor.`;
+  }
+
+  const byCountry = new Map<string, { count: number; revenueTry: number; names: string[] }>();
+  for (const company of companies) {
+    const revenue = [...company.deals, ...company.contracts]
+      .reduce((sum, row) => sum + toTryAt(row.amount, row.currency, rates), 0);
+    const entry = byCountry.get(company.country)
+      ?? { count: 0, revenueTry: 0, names: [] };
+    entry.count += 1;
+    entry.revenueTry += revenue;
+    if (entry.names.length < 4) entry.names.push(company.name);
+    byCountry.set(company.country, entry);
+  }
+
+  const ranked = [...byCountry.entries()].sort((a, b) => b[1].revenueTry - a[1].revenueTry);
+  const totalTry = ranked.reduce((sum, [, v]) => sum + v.revenueTry, 0);
+
+  let out = header('Yurt Dışı Pazarlar');
+  out += `${companies.length} yabancı kurum, ${ranked.length} ülkede. `
+    + `Toplam hacim ≈ ${fmtTry(totalTry)}.\n\n`;
+  for (const [country, value] of ranked) {
+    out += `**${country}** — ${value.count} kurum, ${fmtTry(value.revenueTry)}\n`
+      + `  ${value.names.join(', ')}${value.count > value.names.length ? ' …' : ''}\n`;
+  }
+  out += '\n_Hacim, kazanılmış fırsatlar ve sözleşmelerin bugünkü kurla TL karşılığıdır._';
+  return out;
+}
+
+/** Termin durumu: gecikmiş ve 30 gün içinde terminlenen siparişler. */
+async function deliveryStatus(scope: AnswerScope): Promise<string> {
+  const now = new Date();
+  const horizon = new Date(now);
+  horizon.setDate(horizon.getDate() + 30);
+
+  const contracts = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      company: scope.companyWhere,
+      deliveredAt: null,
+      status: { notIn: ['Feshedildi', 'Taslak'] },
+      deliveryDate: { not: null, lte: horizon },
+    },
+    orderBy: { deliveryDate: 'asc' },
+    take: 40,
+    select: {
+      contractNumber: true, title: true, deliveryDate: true,
+      originalDeliveryDate: true,
+      company: { select: { name: true } },
+    },
+  });
+
+  if (contracts.length === 0) {
+    return `${header('Termin Durumu')}Gecikmiş veya 30 gün içinde terminlenen sipariş yok.`;
+  }
+
+  const days = (d: Date): number => Math.round(
+    (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+      - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86_400_000,
+  );
+
+  const late = contracts.filter((c) => days(c.deliveryDate!) < 0);
+  const soon = contracts.filter((c) => days(c.deliveryDate!) >= 0);
+
+  let out = header('Termin Durumu');
+
+  if (late.length > 0) {
+    out += `**Gecikmiş (${late.length}):**\n`;
+    for (const row of late) {
+      const slip = row.originalDeliveryDate
+        && row.originalDeliveryDate.getTime() !== row.deliveryDate!.getTime();
+      out += `- ${row.company?.name ?? '-'} — ${row.contractNumber}: `
+        + `${Math.abs(days(row.deliveryDate!))} gün gecikti `
+        + `(termin ${fmtDate(row.deliveryDate)})`
+        + (slip ? ` · ilk taahhüt ${fmtDate(row.originalDeliveryDate)}` : '')
+        + '\n';
+    }
+    out += '\n';
+  }
+
+  if (soon.length > 0) {
+    out += `**Yaklaşan (${soon.length}):**\n`;
+    for (const row of soon) {
+      out += `- ${row.company?.name ?? '-'} — ${row.contractNumber}: `
+        + `${days(row.deliveryDate!)} gün kaldı (${fmtDate(row.deliveryDate)})\n`;
+    }
+  }
+
+  return out;
+}
+
+/** İhracat izni ve Son Kullanıcı Belgesi durumu. */
+async function exportLicenceStatus(scope: AnswerScope): Promise<string> {
+  const contracts = await prisma.contract.findMany({
+    where: {
+      deletedAt: null,
+      company: scope.companyWhere,
+      status: { notIn: ['Feshedildi'] },
+      NOT: { exportLicenceStatus: 'Gerekli Değil' },
+    },
+    orderBy: { exportLicenceExpiresAt: 'asc' },
+    take: 60,
+    select: {
+      contractNumber: true, title: true,
+      exportLicenceStatus: true, exportLicenceNumber: true,
+      exportLicenceExpiresAt: true, eucStatus: true,
+      company: { select: { name: true, country: true } },
+    },
+  });
+
+  if (contracts.length === 0) {
+    return `${header('İhracat İzinleri')}İzin takibi gereken sözleşme bulunmuyor.`;
+  }
+
+  const byStatus = new Map<string, typeof contracts>();
+  for (const row of contracts) {
+    const list = byStatus.get(row.exportLicenceStatus) ?? [];
+    list.push(row);
+    byStatus.set(row.exportLicenceStatus, list);
+  }
+
+  let out = header('İhracat İzinleri');
+  out += `${contracts.length} sözleşmede izin takibi var.\n\n`;
+
+  for (const [status, list] of byStatus) {
+    out += `**${status} (${list.length}):**\n`;
+    for (const row of list.slice(0, 8)) {
+      out += `- ${row.company?.name ?? '-'} (${row.company?.country ?? '-'}) — `
+        + `${row.contractNumber}`
+        + (row.exportLicenceNumber ? ` · İzin No: ${row.exportLicenceNumber}` : '')
+        + (row.exportLicenceExpiresAt ? ` · Geçerlilik: ${fmtDate(row.exportLicenceExpiresAt)}` : '')
+        + ` · EUC: ${row.eucStatus}\n`;
+    }
+    if (list.length > 8) out += `  … ve ${list.length - 8} kayıt daha\n`;
+    out += '\n';
+  }
+
+  return out;
+}
+
 function unknownIntent(question: string): string {
   return [
     header('Soruyu Yanıtlayamadım'),
@@ -419,6 +698,10 @@ function unknownIntent(question: string): string {
     '- **Portföy:** "kaç müşterimiz var", "şirket dağılımı"',
     '- **Protokol:** "yaklaşan heyet ziyaretleri"',
     '- **Analiz:** "kayıp nedenleri"',
+    '- **En büyük iş:** "en büyük iş kimle", "en yüksek cirolu sözleşme"',
+    '- **İhracat pazarları:** "hangi ülkelere satıyoruz", "yurt dışı müşteriler"',
+    '- **Termin:** "geciken teslimatlar", "yaklaşan termin"',
+    '- **İzinler:** "ihracat izni durumu", "EUC bekleyenler"',
     '- **Özet:** "genel durum"',
     '',
     'Serbest metin analizi için **Ayarlar → AI Sağlayıcı** bölümünden bir API anahtarı tanımlayın.',

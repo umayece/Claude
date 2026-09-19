@@ -9,6 +9,7 @@ import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
 import { IconFile, IconPlus, IconSearch, IconTrash } from '../components/Icons';
+import { INCOTERMS } from '../types';
 import type { Company, CurrencyCode, Offer, Paginated, Product } from '../types';
 
 const OFFER_STATUSES = ['Taslak', 'Gönderildi', 'Revize', 'Kabul', 'Ret', 'Süresi Doldu'] as const;
@@ -37,6 +38,8 @@ interface OfferForm {
   status: string;
   currency: CurrencyCode;
   costCurrency: CurrencyCode;
+  incoterm: string;
+  incotermPlace: string;
   validUntil: string;
   notes: string;
   items: LineItem[];
@@ -54,6 +57,7 @@ function emptyLine(index: number): LineItem {
 const EMPTY_OFFER: OfferForm = {
   title: '', companyId: null, contactId: null, dealId: null,
   status: 'Taslak', currency: 'USD', costCurrency: 'USD',
+  incoterm: 'FOB', incotermPlace: '',
   validUntil: '', notes: '', items: [emptyLine(0)],
 };
 
@@ -277,6 +281,8 @@ export function Offers() {
         status: form.status,
         currency: form.currency,
         costCurrency: form.costCurrency,
+        incoterm: form.incoterm || null,
+        incotermPlace: form.incotermPlace || null,
         validUntil: form.validUntil || null,
         notes: form.notes || null,
         items: validItems.map((item, index) => ({
@@ -679,6 +685,36 @@ export function Offers() {
             <div className="kpi-sub">
               {margin.percent === null ? 'Satış tutarı girilmedi' : 'Anlık kurla hesaplandı'}
             </div>
+          </div>
+        </div>
+
+        {/*
+          Teslim şekli fiyatın neyi kapsadığını belirler: FOB ile CIF
+          arasındaki fark bir teklifte yüzde onları bulabilir.
+          Varsayılan FOB — ihracatta en yaygın kullanılan şekil.
+        */}
+        <div className="grid grid-2 mt-3" style={{ gap: 0, columnGap: 14 }}>
+          <div className="field">
+            <label className="field-label" htmlFor="of-incoterm">Teslim Şekli (Incoterms)</label>
+            <select
+              id="of-incoterm" className="select" value={form.incoterm}
+              onChange={(event) => setForm((prev) => ({ ...prev, incoterm: event.target.value }))}
+            >
+              <option value="">Belirtilmedi</option>
+              {INCOTERMS.map((item) => (
+                <option key={item.code} value={item.code}>{item.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="of-incoplace">Teslim Yeri</label>
+            <input
+              id="of-incoplace" className="input" value={form.incotermPlace}
+              placeholder="İstanbul Limanı"
+              onChange={(event) => setForm((prev) => ({
+                ...prev, incotermPlace: event.target.value,
+              }))}
+            />
           </div>
         </div>
 

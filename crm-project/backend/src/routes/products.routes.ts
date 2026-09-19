@@ -26,12 +26,34 @@ const productBodySchema = z.object({
   description: z.string().max(5000).nullish(),
   category: z.string().trim().min(1).max(60),
   unitPrice: z.number().min(0).max(1e12).default(0),
-  currency: z.enum(SUPPORTED_CURRENCIES).default('TRY'),
+  currency: z.enum(SUPPORTED_CURRENCIES).default('USD'),
   taxRate: z.number().min(0).max(100).default(20),
   stockQuantity: z.number().int().min(0).max(1e9).default(0),
   minStockLevel: z.number().int().min(0).max(1e9).default(0),
   unit: z.string().trim().max(20).default('Adet'),
   isActive: z.boolean().default(true),
+
+  // --- Ambalaj / lojistik (koli-palet-konteyner hesabı için) ---
+  // Şemada tanımlıydı ama API'ye açılmamıştı; hesaplayıcı katalogdan
+  // ambalaj okuyabilsin diye buraya alındı.
+  unitWeightKg: z.number().min(0).max(1e6).nullish(),
+  caseQuantity: z.number().int().min(0).max(1e6).nullish(),
+  caseLengthCm: z.number().min(0).max(2000).nullish(),
+  caseWidthCm: z.number().min(0).max(2000).nullish(),
+  caseHeightCm: z.number().min(0).max(2000).nullish(),
+  caseWeightKg: z.number().min(0).max(1e5).nullish(),
+  hazardClass: z.string().trim().max(20).nullish(),
+
+  // --- Savunma sanayii sınıflandırması ---
+  /** BM madde numarası, ör. "UN0012". */
+  unNumber: z.string().trim().max(12).nullish(),
+  /** Birim başına net patlayıcı ağırlığı (gram) — sevkiyat izninin dayanağı. */
+  neqGrams: z.number().min(0).max(1e9).nullish(),
+  /** NATO Stok Numarası, 13 hane. */
+  nsn: z.string().trim().max(20).nullish(),
+  /** Askeri Liste sınıfı, ör. "ML3". */
+  militaryListCategory: z.string().trim().max(20).nullish(),
+  requiresExportLicence: z.boolean().default(true),
 });
 
 const listQuerySchema = z.object({
