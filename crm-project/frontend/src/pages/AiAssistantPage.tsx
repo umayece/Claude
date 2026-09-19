@@ -3,8 +3,9 @@ import { api } from '../api/client';
 import { useDebounce } from '../hooks/useDebounce';
 import { AiAssistant, type AiTask } from '../components/AiAssistant';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
-import { IconAlert, IconBox, IconSparkles } from '../components/Icons';
+import { IconAlert, IconBox, IconPallet, IconSparkles } from '../components/Icons';
 import { LogisticsCalculator } from '../components/LogisticsCalculator';
+import { PalletCalculator } from '../components/PalletCalculator';
 import type { Company, Paginated, Tender } from '../types';
 
 interface AiStatus {
@@ -32,7 +33,7 @@ const TASK_OPTIONS: { value: AiTask; label: string; description: string }[] = [
   },
 ];
 
-type PageTab = 'assistant' | 'logistics';
+type PageTab = 'assistant' | 'logistics' | 'pallet';
 
 export function AiAssistantPage() {
   const [pageTab, setPageTab] = useState<PageTab>('assistant');
@@ -117,11 +118,14 @@ export function AiAssistantPage() {
   const ready = task === 'FREEFORM' ? question.trim().length > 0 : Boolean(entityId);
 
   return (
-    <>
+    <div className="page-wide">
       <div className="page-header">
         <div className="page-header-text">
-          <h1><IconSparkles size={19} /> AI Asistan</h1>
-          <p>Şirket geçmişi özeti ve ihale şartnamesi risk analizi.</p>
+          <h1><IconSparkles size={19} /> AI Asistan & Lojistik</h1>
+          <p>
+            Şirket geçmişi özeti, ihale risk analizi, mühimmat ambalajı ve
+            palet optimizasyonu.
+          </p>
         </div>
       </div>
 
@@ -138,12 +142,23 @@ export function AiAssistantPage() {
           className={`drawer-tab${pageTab === 'logistics' ? ' active' : ''}`}
           onClick={() => setPageTab('logistics')}
         >
-          <IconBox size={14} /> Koli & Lojistik Hesaplayıcı
+          <IconBox size={14} /> Mühimmat & Sandık
+        </button>
+        <button
+          type="button"
+          className={`drawer-tab${pageTab === 'pallet' ? ' active' : ''}`}
+          onClick={() => setPageTab('pallet')}
+        >
+          <IconPallet size={14} /> Palet & Konteyner
         </button>
       </div>
 
       {pageTab === 'logistics' && (
         <div className="card"><div className="card-body"><LogisticsCalculator /></div></div>
+      )}
+
+      {pageTab === 'pallet' && (
+        <div className="card"><div className="card-body"><PalletCalculator /></div></div>
       )}
 
       {pageTab === 'assistant' && status && !status.modelConfigured && (
@@ -280,6 +295,6 @@ export function AiAssistantPage() {
       </div>
       </>
       )}
-    </>
+    </div>
   );
 }

@@ -42,7 +42,10 @@ export class HeatCanvasLayer extends L.Layer {
   constructor(points: HeatPoint[], options: Partial<HeatOptions> = {}) {
     super();
     this.points = points;
-    this.options = { radius: 34, blur: 22, maxOpacity: 0.82, ...options };
+    // Yumuşatılmış varsayılanlar: önceki değerler (34px yarıçap, %82
+    // opaklık) çiğ ve göz yoran lekeler üretiyordu. Daha geniş ve daha
+    // saydam bir dağılım altındaki haritayı okunur bırakır.
+    this.options = { radius: 30, blur: 30, maxOpacity: 0.55, ...options };
   }
 
   override onAdd(map: L.Map): this {
@@ -158,12 +161,15 @@ export class HeatCanvasLayer extends L.Layer {
     if (!context) return new Uint8ClampedArray(1024);
 
     const gradient = context.createLinearGradient(0, 0, 256, 0);
-    gradient.addColorStop(0.00, 'rgba(76, 29, 149, 0)');
-    gradient.addColorStop(0.18, 'rgba(76, 29, 149, 0.75)');
-    gradient.addColorStop(0.38, 'rgba(37, 99, 235, 0.85)');
-    gradient.addColorStop(0.58, 'rgba(34, 211, 238, 0.90)');
-    gradient.addColorStop(0.78, 'rgba(250, 204, 21, 0.94)');
-    gradient.addColorStop(1.00, 'rgba(239, 68, 68, 1)');
+    // Kurumsal yoğunluk skalası: koyu lacivert → kurumsal mavi → amber.
+    // Önceki çiğ sarı-kırmızı skala "alarm" gibi okunuyordu; bu skala
+    // yoğunluğu gösterirken haritanın altındaki coğrafyayı boğmaz.
+    gradient.addColorStop(0.00, 'rgba(15, 32, 66, 0)');
+    gradient.addColorStop(0.20, 'rgba(15, 32, 66, 0.55)');
+    gradient.addColorStop(0.45, 'rgba(30, 64, 140, 0.68)');
+    gradient.addColorStop(0.68, 'rgba(37, 99, 235, 0.78)');
+    gradient.addColorStop(0.86, 'rgba(217, 152, 40, 0.86)');
+    gradient.addColorStop(1.00, 'rgba(245, 158, 11, 0.94)');
 
     context.fillStyle = gradient;
     context.fillRect(0, 0, 256, 1);

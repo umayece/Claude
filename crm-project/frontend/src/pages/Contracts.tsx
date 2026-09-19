@@ -11,6 +11,8 @@ import { SearchableSelect, type SelectOption } from '../components/SearchableSel
 import { SplitDrawer, SpecRow } from '../components/SplitDrawer';
 import { printCorporateDocument } from '../utils/corporatePrint';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
+import { DraftBanner } from '../components/DraftBanner';
+import { useDraftAutosave } from '../hooks/useDraftAutosave';
 import {
   IconAlert, IconBox, IconClock, IconCredit, IconDownload, IconEdit, IconFile,
   IconPlus, IconSearch, IconShield, IconTrash, IconTruck,
@@ -147,6 +149,9 @@ export function Contracts() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
+  /* Form taslağı: sekme kapanırsa yazılanlar kaybolmasın.
+     Taslak otomatik uygulanmaz; kullanıcı bildirimden yükler. */
+  const draftStore = useDraftAutosave<FormState>('contract:new', EMPTY, { enabled: formOpen });
   const [editing, setEditing] = useState<Contract | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -274,6 +279,12 @@ export function Contracts() {
     setFormOpen(true);
   };
 
+  // Form değiştikçe taslağa yazılır (kanca geciktirir).
+  useEffect(() => {
+    if (formOpen) draftStore.setDraft(form);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, formOpen]);
+
   const save = async (): Promise<void> => {
     if (!form.companyId) {
       setFormError('Müşteri seçimi zorunludur.');
@@ -321,6 +332,8 @@ export function Contracts() {
       else await api.post('/contracts', payload);
 
       setFormOpen(false);
+      // Kayıt başarılı: taslak artık gereksiz.
+      draftStore.clearDraft();
       await load();
       if (detail) await openDetail(detail.id);
     } catch (err) {
@@ -1077,6 +1090,16 @@ export function Contracts() {
           </>
         }
       >
+        <DraftBanner
+          visible={draftStore.pendingDraft !== null}
+          savedAt={draftStore.pendingSavedAt}
+          onRestore={() => {
+            if (draftStore.pendingDraft) setForm(draftStore.pendingDraft);
+            draftStore.restoreDraft();
+          }}
+          onDiscard={draftStore.discardDraft}
+        />
+
         {formError && <div className="alert alert-danger">{formError}</div>}
 
         <div className="grid grid-2" style={{ gap: 0, columnGap: 14 }}>

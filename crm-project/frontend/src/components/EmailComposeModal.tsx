@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { useDraftAutosave } from '../hooks/useDraftAutosave';
+import { DraftBanner, DraftStatusLine } from './DraftBanner';
 import { Modal } from './Modal';
 import { IconMail, IconAlert } from './Icons';
 
@@ -98,7 +99,10 @@ export function EmailComposeModal({
 }: Props) {
   const draftKey = `email:${companyId ?? 'genel'}:${contactId ?? 'genel'}`;
 
-  const { draft, setDraft, status, clearDraft, hasRestoredDraft } = useDraftAutosave<DraftShape>(
+  const {
+    draft, setDraft, status, lastSavedAt, clearDraft,
+    pendingDraft, restoreDraft, discardDraft, pendingSavedAt,
+  } = useDraftAutosave<DraftShape>(
     draftKey,
     { to: defaultTo, cc: '', subject: '', body: '' },
     { enabled: open },
@@ -157,9 +161,7 @@ export function EmailComposeModal({
       footer={
         <>
           <span className="text-xs text-muted ml-auto" style={{ marginRight: 'auto' }}>
-            {status === 'saving' && 'Taslak kaydediliyor…'}
-            {status === 'saved' && 'Taslak kaydedildi'}
-            {status === 'error' && 'Taslak kaydedilemedi (depolama dolu olabilir)'}
+            <DraftStatusLine status={status} lastSavedAt={lastSavedAt} />
           </span>
           <button type="button" className="btn" onClick={onClose}>Vazgeç</button>
           <button
@@ -183,12 +185,12 @@ export function EmailComposeModal({
         </div>
       </div>
 
-      {hasRestoredDraft && (
-        <div className="alert alert-warning">
-          Yarım kalmış bir taslak geri yüklendi.
-          <button type="button" className="btn btn-sm ml-auto" onClick={clearDraft}>Temizle</button>
-        </div>
-      )}
+      <DraftBanner
+        visible={pendingDraft !== null}
+        savedAt={pendingSavedAt}
+        onRestore={restoreDraft}
+        onDiscard={discardDraft}
+      />
 
       <div className="field">
         <label className="field-label" htmlFor="email-template">Hazır Şablon</label>

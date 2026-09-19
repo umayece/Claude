@@ -10,6 +10,21 @@ interface UseDraftAutosave<T> {
   /** Kaydedilmiş taslağı siler (form gönderildikten sonra çağrılır). */
   clearDraft: () => void;
   hasRestoredDraft: boolean;
+
+  /**
+   * Bulunan ama HENÜZ UYGULANMAMIŞ taslak.
+   *
+   * Taslak otomatik yüklenmez: kullanıcı yeni bir kayıt açtığını sanırken
+   * karşısına eski bir taslağın alanları çıkarsa bunu fark etmeyip yanlış
+   * veriyi kaydedebilir. Karar kullanıcınındır.
+   */
+  pendingDraft: T | null;
+  /** Bulunan taslağı forma uygular. */
+  restoreDraft: () => void;
+  /** Bulunan taslağı reddeder ve depodan siler. */
+  discardDraft: () => void;
+  /** Taslağın kaydedildiği zaman (bildirimde gösterilir). */
+  pendingSavedAt: Date | null;
 }
 
 /**
@@ -28,17 +43,13 @@ export function useDraftAutosave<T>(
   const storageKey = `crm:draft:${key}`;
 
   const [hasRestoredDraft, setHasRestoredDraft] = useState(false);
-  const [draft, setDraftState] = useState<T>(() => {
-    if (!enabled) return initialValue;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (!raw) return initialValue;
-      const parsed = JSON.parse(raw) as { value: T; savedAt: string };
-      return parsed.value;
-    } catch {
-      return initialValue;
-    }
-  });
+
+  // Form HER ZAMAN temiz başlar. Depodaki taslak ayrı tutulur ve
+  // kullanıcı "Taslağı Yükle" derse uygulanır.
+  const [draft, setDraftState] = useState<T>(initialValue);
+
+  const [pendingDraft, setPendingDraft] = useState<T | null>(null);
+  const [pendingSavedAt, setPendingSavedAt] = useState<Date | null>(null);
 
   const [status, setStatus] = useState<DraftStatus>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -46,11 +57,28 @@ export function useDraftAutosave<T>(
   // İlk render'da (yalnızca yükleme) kaydetme tetiklenmemeli.
   const isFirstRun = useRef(true);
 
+  // Açılışta depoyu tara: taslak varsa bildirim için hazırla.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setPendingDraft(null);
+      setHasRestoredDraft(false);
+      return;
+    }
     try {
-      setHasRestoredDraft(window.localStorage.getItem(storageKey) !== null);
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) {
+        setPendingDraft(null);
+        setHasRestoredDraft(false);
+        return;
+      }
+      const parsed = JSON.parse(raw) as { value: T; savedAt: string };
+      setPendingDraft(parsed.value);
+      const savedAt = new Date(parsed.savedAt);
+      setPendingSavedAt(Number.isNaN(savedAt.getTime()) ? null : savedAt);
+      setHasRestoredDraft(true);
     } catch {
+      // Bozuk JSON: taslak yok sayılır, form temiz açılır.
+      setPendingDraft(null);
       setHasRestoredDraft(false);
     }
   }, [storageKey, enabled]);
@@ -88,6 +116,23 @@ export function useDraftAutosave<T>(
     setDraftState((prev) => (typeof value === 'function' ? (value as (p: T) => T)(prev) : value));
   }, []);
 
+  const restoreDraft = useCallback(() => {
+    if (pendingDraft === null) return;
+    setDraftState(pendingDraft);
+    setPendingDraft(null);
+  }, [pendingDraft]);
+
+  const discardDraft = useCallback(() => {
+    setPendingDraft(null);
+    setPendingSavedAt(null);
+    setHasRestoredDraft(false);
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // Silinemezse bir sonraki kaydetme üzerine yazar.
+    }
+  }, [storageKey]);
+
   const clearDraft = useCallback(() => {
     if (timer.current !== null) window.clearTimeout(timer.current);
     try {
@@ -98,7 +143,12 @@ export function useDraftAutosave<T>(
     setStatus('idle');
     setLastSavedAt(null);
     setHasRestoredDraft(false);
+    setPendingDraft(null);
+    setPendingSavedAt(null);
   }, [storageKey]);
 
-  return { draft, setDraft, status, lastSavedAt, clearDraft, hasRestoredDraft };
+  return {
+    draft, setDraft, status, lastSavedAt, clearDraft, hasRestoredDraft,
+    pendingDraft, restoreDraft, discardDraft, pendingSavedAt,
+  };
 }

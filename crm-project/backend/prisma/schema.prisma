@@ -386,7 +386,10 @@ model Offer {
   id          String @id @default(uuid())
   offerNumber String @unique
   title       String
-  companyId   String
+  /// Kurum bağı ZORUNLU DEĞİL: bağımsız danışman, aracı veya komisyoncuya
+  /// doğrudan teklif verilebilir. En az biri (kurum ya da kişi) dolu olmalı;
+  /// bu kural rota katmanında doğrulanır.
+  companyId   String?
   contactId   String?
   dealId      String?
 
@@ -421,7 +424,7 @@ model Offer {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company?    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   contact   Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
   deal      Deal?       @relation(fields: [dealId], references: [id], onDelete: SetNull)
   items     OfferItem[]
@@ -431,6 +434,7 @@ model Offer {
   @@index([deletedAt])
   @@index([status])
   @@index([dealId])
+  @@index([contactId])
 }
 
 model OfferItem {

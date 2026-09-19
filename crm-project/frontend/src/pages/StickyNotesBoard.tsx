@@ -4,7 +4,20 @@ import { IconNote, IconPlus, IconTrash } from '../components/Icons';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
 import type { StickyNote } from '../types';
 
-const COLORS = ['#fef3c7', '#dcfce7', '#dbeafe', '#fce7f3', '#ede9fe', '#fee2e2'];
+/**
+ * Not renkleri — kurumsal yumuşak palet.
+ *
+ * Önceki palette çiğ pembe, mor ve kırmızı tonları vardı; kurumsal bir
+ * ekranda dikkat dağıtıyor ve kırmızı not "hata" gibi okunuyordu. Bu dört
+ * ton düşük doygunlukta ve birbirinden ayırt edilebilir.
+ */
+const NOTE_COLORS = [
+  '#E0F2FE', // soft mavi
+  '#FEF9C3', // soft sarı
+  '#DCFCE7', // soft sage yeşili
+  '#F1F5F9', // yumuşak gri
+];
+const COLORS = NOTE_COLORS;
 
 export function StickyNotesBoard() {
   const confirmDelete = useDeleteConfirm();
@@ -168,7 +181,7 @@ export function StickyNotesBoard() {
                 className="w-full"
                 style={{
                   border: 0, background: 'transparent', fontWeight: 700,
-                  fontSize: 13.5, color: '#422006', outline: 'none', marginBottom: 6,
+                  fontSize: 13.5, color: 'var(--mke-anthracite)', outline: 'none', marginBottom: 6,
                 }}
                 placeholder="Başlık"
                 value={note.title ?? ''}

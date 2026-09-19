@@ -32,6 +32,17 @@ function starPoints(radius: number): string {
   return points.join(' ');
 }
 
+/*
+  Yıldız köşeleri MODÜL DÜZEYİNDE bir kez hesaplanır.
+
+  Önceden her render'da üç kez 16 noktalık trigonometri çalışıyordu.
+  Tek başına ucuz ama giriş ekranı gibi ilk boyamanın kritik olduğu
+  yerlerde gereksiz iş. Yarıçaplar sabit olduğu için sonuç da sabittir.
+*/
+const OUTER_POINTS = starPoints(46);
+const MIDDLE_POINTS = starPoints(33);
+const CENTER_POINTS = starPoints(14);
+
 export function MkeStar({ size = 200, className, outline = true, color = 'currentColor' }: Props) {
   return (
     <svg
@@ -44,7 +55,7 @@ export function MkeStar({ size = 200, className, outline = true, color = 'curren
     >
       {/* Dış çeper */}
       <polygon
-        points={starPoints(46)}
+        points={OUTER_POINTS}
         fill={outline ? 'none' : color}
         stroke={color}
         strokeWidth={outline ? 1.6 : 0}
@@ -52,7 +63,7 @@ export function MkeStar({ size = 200, className, outline = true, color = 'curren
       />
       {/* İç çeper — çift çeperli görünümü veren ikinci yıldız */}
       <polygon
-        points={starPoints(33)}
+        points={MIDDLE_POINTS}
         fill="none"
         stroke={color}
         strokeWidth={1.2}
@@ -60,7 +71,7 @@ export function MkeStar({ size = 200, className, outline = true, color = 'curren
       />
       {/* Merkez sekizgen */}
       <polygon
-        points={starPoints(14)}
+        points={CENTER_POINTS}
         fill={outline ? 'none' : color}
         stroke={color}
         strokeWidth={1}

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useExchangeRates } from '../hooks/useExchangeRates';
-import { IconEdit, IconFile, IconTrash, IconTrending } from './Icons';
+import { IconEdit, IconFile, IconMore, IconTrash, IconTrending } from './Icons';
 import type { Deal } from '../types';
 
 const STAGE_COLORS: Record<string, string> = {
@@ -42,6 +42,18 @@ export function DealKanban({
   const { format, formatCompact, value } = useExchangeRates();
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Açık kart menüsü. Aynı anda tek menü açık kalır; ikincisi ilkini kapatır.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+
+  // Menü dışına tıklayınca kapanır. Tek bir belge dinleyicisi yeterli:
+  // her kart için ayrı dinleyici bağlamak sütun dolduğunda yüzlerce
+  // dinleyici demektir.
+  useEffect(() => {
+    if (menuFor === null) return;
+    const close = (): void => setMenuFor(null);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuFor]);
   const [dropStage, setDropStage] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -193,53 +205,79 @@ export function DealKanban({
                     <div className="text-xs text-danger mt-1">Kayıp: {deal.lossReason}</div>
                   )}
 
+                  {/*
+                    Kart eylemleri üç nokta menüsünde.
+
+                    Önceden her kartta dört ayrı renkli düğme duruyordu;
+                    sütun dolduğunda ekran düğme kalabalığına dönüşüyor ve
+                    asıl bilgi (başlık, tutar, tarih) okunmuyordu. Menü
+                    yalnızca ihtiyaç anında açılır.
+                  */}
                   {canWrite && (
-                    <div className="kanban-card-actions">
-                      {/* Dokunmatik cihazlarda HTML5 sürükleme çalışmaz;
-                          aşama seçici her zaman kullanılabilir bir yedektir. */}
-                      <select
-                        className="select"
-                        style={{ padding: '2px 5px', fontSize: 11, width: 'auto', flex: 1 }}
-                        value={deal.stage}
-                        disabled={pendingId === deal.id}
-                        onChange={(event) => void move(deal, event.target.value)}
-                        aria-label={`${deal.title} aşaması`}
-                      >
-                        {stages.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
-
-                      {/* Teklif kısayolu ikon değil ETİKETLİ düğme:
-                          simgeyle gösterildiğinde kullanıcılar bu adımı
-                          bulamıyordu. */}
+                    <div className="kanban-card-menu">
                       <button
-                        type="button" className="btn btn-accent btn-sm"
-                        style={{ padding: '3px 8px', fontSize: 11 }}
-                        title="Bu fırsattan teklif oluştur"
-                        onClick={() => onCreateOffer(deal)}
+                        type="button"
+                        className="kanban-menu-trigger"
+                        aria-label={`${deal.title} işlemleri`}
+                        aria-expanded={menuFor === deal.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setMenuFor((prev) => (prev === deal.id ? null : deal.id));
+                        }}
                       >
-                        <IconFile size={12} /> Teklif
+                        <IconMore size={15} />
                       </button>
 
-                      <button
-                        type="button" className="btn btn-ghost btn-icon"
-                        style={{ width: 24, height: 24 }}
-                        title="Düzenle" aria-label="Düzenle"
-                        onClick={() => onEdit(deal)}
-                      >
-                        <IconEdit size={13} />
-                      </button>
+                      {menuFor === deal.id && (
+                        <div className="kanban-menu" role="menu">
+                          <button
+                            type="button" className="kanban-menu-item" role="menuitem"
+                            onClick={() => { setMenuFor(null); onCreateOffer(deal); }}
+                          >
+                            <IconFile size={13} /> Teklif Oluştur
+                          </button>
+                          <button
+                            type="button" className="kanban-menu-item" role="menuitem"
+                            onClick={() => { setMenuFor(null); onEdit(deal); }}
+                          >
+                            <IconEdit size={13} /> Düzenle
+                          </button>
 
-                      {canDelete && (
-                        <button
-                          type="button" className="btn btn-ghost btn-icon"
-                          style={{ width: 24, height: 24, color: 'var(--danger)' }}
-                          title="Sil" aria-label="Sil"
-                          onClick={() => onDelete(deal)}
-                        >
-                          <IconTrash size={13} />
-                        </button>
+                          {/* Dokunmatik cihazlarda HTML5 sürükleme
+                              çalışmaz; aşama seçici her zaman kullanılabilir
+                              bir yedektir. */}
+                          <div className="kanban-menu-field">
+                            <label className="field-label" htmlFor={`stage-${deal.id}`}>
+                              Aşama
+                            </label>
+                            <select
+                              id={`stage-${deal.id}`}
+                              className="select"
+                              style={{ fontSize: 12, padding: '4px 6px' }}
+                              value={deal.stage}
+                              disabled={pendingId === deal.id}
+                              onChange={(event) => {
+                                setMenuFor(null);
+                                void move(deal, event.target.value);
+                              }}
+                            >
+                              {stages.map((option) => (
+                                <option key={option} value={option}>{option}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {canDelete && (
+                            <button
+                              type="button"
+                              className="kanban-menu-item is-danger"
+                              role="menuitem"
+                              onClick={() => { setMenuFor(null); onDelete(deal); }}
+                            >
+                              <IconTrash size={13} /> Sil
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}

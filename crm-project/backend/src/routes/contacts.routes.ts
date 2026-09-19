@@ -5,7 +5,7 @@ import { prisma } from '../lib/prisma';
 import { NotFound } from '../lib/errors';
 import { asyncHandler } from '../utils/asyncHandler';
 import { normalizePhone } from '../utils/phone';
-import { paginated, parsePagination } from '../utils/pagination';
+import { buildOrderBy, paginated, parsePagination } from '../utils/pagination';
 import { authenticate, requireMfaComplete } from '../middleware/auth';
 import { requirePermission, assertCompanyAccess, companyScope } from '../middleware/rbac';
 import { validate, validated } from '../middleware/validate';
@@ -37,6 +37,25 @@ const phoneSchema = z.object({
  * uygulanır; şema `.and()` ile birleştirilseydi ortaya çıkan ZodIntersection
  * `.partial()` desteklemez ve kısmi güncelleme (PUT) şeması kurulamazdı.
  */
+/**
+ * Boş metni null'a çeviren kimlik doğrulayıcı.
+ *
+ * Tarayıcı formları temizlenen bir seçiciden `null` değil `""` gönderir.
+ * Düz `z.string().uuid().nullish()` bunu reddeder ve kullanıcı sebebi
+ * anlaşılmayan bir doğrulama hatası görür. Burada boş metin açıkça
+ * "bağ yok" anlamına getirilir.
+ */
+const optionalId = z.preprocess(
+  (value) => (value === '' || value === undefined ? null : value),
+  z.string().uuid().nullable(),
+);
+
+/** Boş metni null'a çeviren serbest metin alanı. */
+const optionalText = (max: number) => z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+  z.string().trim().max(max).nullable(),
+);
+
 const CONTACT_TYPES = [
   'Kurum Çalışanı', 'Bağımsız Danışman', 'Aracı/Komisyoncu',
   'Askeri Ataşe', 'Diğer',
@@ -50,34 +69,73 @@ const contactFieldsSchema = z.object({
    * kurumu çoğu zaman sistemde yoktur; kişiyi kaydedebilmek için sahte
    * bir şirket açmak zorunda kalmak veriyi bozar.
    */
-  companyId: z.string().uuid().nullish(),
+  companyId: optionalId.optional(),
   contactType: z.enum(CONTACT_TYPES).default('Kurum Çalışanı'),
 
   // --- Bağımsız kişinin kendi adres/konum bilgisi ---
   addressLine: z.string().trim().max(400).nullish(),
   cityName: z.string().trim().max(120).nullish(),
-  country: z.string().trim().max(80).default('Türkiye'),
-  countryCode: z.string().trim().length(2).toUpperCase().default('TR'),
-  latitude: z.number().min(-90).max(90).nullish(),
-  longitude: z.number().min(-180).max(180).nullish(),
+  // Boş bırakılan ülke alanı varsayılana düşer; `.length(2)` boş metinde
+  // patlıyor ve kullanıcıya anlamsız bir hata gösteriyordu.
+  country: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? 'Türkiye' : v),
+    z.string().trim().max(80),
+  ).default('Türkiye'),
+  countryCode: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? 'TR' : v),
+    z.string().trim().length(2).toUpperCase(),
+  ).default('TR'),
+  // Koordinat alanları metin olarak da gelebilir (form input'u string
+  // döndürür); boş metin "koordinat yok" demektir.
+  latitude: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
+    z.number().min(-90).max(90).nullable(),
+  ).optional(),
+  longitude: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
+    z.number().min(-180).max(180).nullable(),
+  ).optional(),
   firstName: z.string().trim().min(1, 'Ad zorunludur.').max(80),
   lastName: z.string().trim().min(1, 'Soyad zorunludur.').max(80),
-  title: z.string().trim().max(120).nullish(),
+  title: optionalText(120).optional(),
   email: z.string().trim().email('Geçerli bir e-posta giriniz.').max(255).nullish().or(z.literal('')),
-  departmentName: z.string().trim().max(120).nullish(),
-  managerName: z.string().trim().max(120).nullish(),
+  departmentName: optionalText(120).optional(),
+  managerName: optionalText(120).optional(),
   website: z.string().trim().max(255).nullish(),
   sector: z.string().trim().max(80).nullish(),
-  avatarUrl: z.string().trim().max(500_000).nullish(),
+  /**
+   * Profil fotoğrafı base64 olarak saklanır. Sınır aşıldığında kullanıcı
+   * "Beklenmeyen hata" değil, ne yapması gerektiğini söyleyen bir mesaj
+   * görmeli.
+   */
+  avatarUrl: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z.string().max(500_000, 'Profil fotoğrafı çok büyük (en fazla ~350 KB). '
+      + 'Daha küçük bir görsel seçin.').nullable(),
+  ).optional(),
   linkedinUrl: z.string().trim().max(255).nullish(),
   notes: z.string().max(5000).nullish(),
   isPrimary: z.boolean().default(false),
   phones: z.array(phoneSchema).max(15).default([]),
 
-  /** Esnek doğum tarihi: yalnızca yıl veya yalnızca ay/gün girilebilir. */
-  birthYear: z.number().int().min(1900).max(new Date().getFullYear()).nullish(),
-  birthMonth: z.number().int().min(1).max(12).nullish(),
-  birthDay: z.number().int().min(1).max(31).nullish(),
+  /**
+   * Esnek doğum tarihi: yalnızca yıl veya yalnızca ay/gün girilebilir.
+   *
+   * Boş metin `Number('')` ile 0'a dönüşüp `min(1900)` doğrulamasını
+   * patlatıyordu; önce null'a çevriliyor.
+   */
+  birthYear: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
+    z.number().int().min(1900).max(new Date().getFullYear()).nullable(),
+  ).optional(),
+  birthMonth: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
+    z.number().int().min(1).max(12).nullable(),
+  ).optional(),
+  birthDay: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
+    z.number().int().min(1).max(31).nullable(),
+  ).optional(),
 });
 
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -133,6 +191,7 @@ const listQuerySchema = z.object({
   countryCode: z.string().trim().length(2).toUpperCase().optional(),
   /** Yalnızca bağımsız (kurumsuz) kişileri süz. */
   standalone: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+  sort: z.string().max(40).optional(),
   /** "1-12": doğum günü bu ayda olan kişiler. */
   birthMonth: z.coerce.number().int().min(1).max(12).optional(),
 });
@@ -239,7 +298,15 @@ router.get(
       prisma.contact.findMany({
         where,
         include: contactInclude,
-        orderBy: [{ isPrimary: 'desc' }, { lastName: 'asc' }, { firstName: 'asc' }],
+        // Kullanıcı bir kolona tıkladıysa o sıralama uygulanır; aksi halde
+        // varsayılan sıra (birincil kişi önce, sonra soyada göre).
+        orderBy: query.sort
+          ? buildOrderBy(
+            query.sort,
+            ['lastName', 'firstName', 'createdAt', 'contactType', 'country'] as const,
+            'lastName',
+          )
+          : [{ isPrimary: 'desc' }, { lastName: 'asc' }, { firstName: 'asc' }],
         skip: page.skip,
         take: page.take,
       }),

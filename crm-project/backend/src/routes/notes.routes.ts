@@ -23,14 +23,31 @@ router.use(authenticate, requireMfaComplete);
 const noteFieldsSchema = z.object({
   title: z.string().trim().max(200).nullish(),
   body: z.string().max(20_000).default(''),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Renk #RRGGBB biçiminde olmalıdır.').default('#fef3c7'),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Renk #RRGGBB biçiminde olmalıdır.').default('#E0F2FE'),
   positionX: z.number().int().min(0).max(20_000).default(0),
   positionY: z.number().int().min(0).max(20_000).default(0),
   isPinned: z.boolean().default(false),
   /** Zaman tünelinden eklenen notlar bir kuruma bağlanır. */
-  companyId: z.string().uuid().nullish(),
-  contactId: z.string().uuid().nullish(),
-  dealId: z.string().uuid().nullish(),
+  /*
+    Bağ kimlikleri: boş metin "bağ yok" demektir.
+
+    Temizlenen bir seçici `null` değil `""` gönderir; düz
+    `z.string().uuid().nullish()` bunu reddedip kullanıcıya sebebi
+    anlaşılmayan bir doğrulama hatası veriyordu. Kişiye not eklerken
+    şirket bağı ZORUNLU DEĞİLDİR.
+  */
+  companyId: z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.string().uuid().nullable(),
+  ).optional(),
+  contactId: z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.string().uuid().nullable(),
+  ).optional(),
+  dealId: z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.string().uuid().nullable(),
+  ).optional(),
 });
 
 const createSchema = noteFieldsSchema;

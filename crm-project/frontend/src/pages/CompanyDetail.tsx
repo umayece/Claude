@@ -21,8 +21,11 @@ import type { Activity, Company, Note, Paginated } from '../types';
 
 type TabKey = 'activity' | 'notes' | 'email' | 'whatsapp' | 'task' | 'ticket' | 'ai';
 
-/** Yapışkan not renkleri — "Notlarım" panosuyla aynı palet. */
-const NOTE_COLORS = ['#fef3c7', '#dcfce7', '#dbeafe', '#fce7f3', '#ede9fe', '#f1f5f9'];
+/**
+ * Yapışkan not renkleri — "Notlarım" panosuyla AYNI palet.
+ * Değiştirilirse `StickyNotesBoard.tsx` ile birlikte güncellenmeli.
+ */
+const NOTE_COLORS = ['#E0F2FE', '#FEF9C3', '#DCFCE7', '#F1F5F9'];
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';

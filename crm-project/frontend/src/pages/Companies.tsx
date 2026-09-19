@@ -9,6 +9,8 @@ import { Pagination } from '../components/Pagination';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { IconBuilding, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/Icons';
 import { useConfirm } from '../components/ConfirmDialog';
+import { DraftBanner } from '../components/DraftBanner';
+import { useDraftAutosave } from '../hooks/useDraftAutosave';
 import type {
   City, Company, CompanyType, CountryOption, CustomFieldDefinition, Paginated,
 } from '../types';
@@ -90,6 +92,7 @@ export function Companies() {
   const [pageSize, setPageSize] = useLocalStorage('crm:companies:pageSize', 25);
 
   const [result, setResult] = useState<Paginated<Company> | null>(null);
+  const { sort, toggle: toggleSort, toQuery: sortQuery } = useTriStateSort();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,6 +102,9 @@ export function Companies() {
   const [scopeFilter, setScopeFilter] = useState<'' | 'domestic' | 'international'>('');
 
   const [formOpen, setFormOpen] = useState(false);
+  /* Form taslağı: sekme kapanırsa yazılanlar kaybolmasın.
+     Taslak otomatik uygulanmaz; kullanıcı bildirimden yükler. */
+  const draftStore = useDraftAutosave<FormState>('company:new', EMPTY_FORM, { enabled: formOpen });
   const [editing, setEditing] = useState<Company | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -119,6 +125,7 @@ export function Companies() {
           type: typeFilter || undefined,
           status: statusFilter || undefined,
           scope: scopeFilter || undefined,
+          sort: sortQuery(),
         },
         signal,
       );
@@ -129,7 +136,7 @@ export function Companies() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, typeFilter, statusFilter, scopeFilter]);
+  }, [page, pageSize, debouncedTerm, typeFilter, statusFilter, scopeFilter, sortQuery]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -213,6 +220,12 @@ export function Companies() {
     setFormOpen(true);
   };
 
+  // Form değiştikçe taslağa yazılır (kanca geciktirir).
+  useEffect(() => {
+    if (formOpen) draftStore.setDraft(form);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, formOpen]);
+
   const save = async (force = false): Promise<void> => {
     setSaving(true);
     setFormError(null);
@@ -253,6 +266,8 @@ export function Companies() {
       }
 
       setFormOpen(false);
+      // Kayıt başarılı: taslak artık gereksiz.
+      draftStore.clearDraft();
       await load();
     } catch (err) {
       const apiError = err as { code?: string; message?: string };
@@ -379,9 +394,9 @@ export function Companies() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Kurum</th>
+                    <SortableTh field="name" sort={sort} onToggle={toggleSort}>Kurum</SortableTh>
                     <th>Tip</th>
-                    <th>Durum</th>
+                    <SortableTh field="status" sort={sort} onToggle={toggleSort}>Durum</SortableTh>
                     <th>Sektör</th>
                     <th>Ülke / Şehir</th>
                     <th className="text-right">Kişi</th>
@@ -477,6 +492,16 @@ export function Companies() {
           </>
         }
       >
+        <DraftBanner
+          visible={draftStore.pendingDraft !== null}
+          savedAt={draftStore.pendingSavedAt}
+          onRestore={() => {
+            if (draftStore.pendingDraft) setForm(draftStore.pendingDraft);
+            draftStore.restoreDraft();
+          }}
+          onDiscard={draftStore.discardDraft}
+        />
+
         {formError && <div className="alert alert-danger">{formError}</div>}
         {duplicateWarning && (
           <div className="alert alert-warning">

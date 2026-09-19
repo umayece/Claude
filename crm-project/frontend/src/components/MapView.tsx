@@ -3,9 +3,10 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 import type { MapPoint } from '../types';
 import { HeatCanvasLayer, type HeatPoint } from './HeatCanvasLayer';
-import { IconRefresh, IconMap } from './Icons';
+import { IconChevronDown, IconChevronLeft, IconRefresh, IconMap } from './Icons';
 
 type TypeFilter = 'ALL' | 'B2G' | 'B2B' | 'B2C' | 'G2G';
 type ScopeFilter = 'ALL' | 'TR' | 'INTL';
@@ -62,6 +63,9 @@ export function MapView() {
   const [onlyRecent, setOnlyRecent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Filtre paneli katlanabilir: harita küçük ekranlarda panel tarafından
+  // tıkanmasın. Tercih oturumlar arası hatırlanır.
+  const [filtersOpen, setFiltersOpen] = useLocalStorage('crm:map:filtersOpen', true);
 
   // --- Harita örneğini bir kez kur ---
   useEffect(() => {
@@ -81,19 +85,26 @@ export function MapView() {
       maxBoundsViscosity: 1,
     });
 
-    // Anahtarsız, ücretsiz, resmî OpenStreetMap karo sunucusu.
+    // CARTO Voyager — ANAHTARSIZ ve ücretsiz raster karo servisi.
     //
-    // Anahtar isteyen ticari karo sağlayıcıları, anahtarsız isteklerde
-    // karoların üzerine "API KEY REQUIRED" filigranı basar. Bu projede
-    // böyle bir sağlayıcı KULLANILMAZ; aşağıdaki URL değiştirilmemelidir.
+    // Standart OSM karolarında etiketler yerel dilde basılır (Arapça,
+    // Yunanca, Rusça...). CARTO'nun bu uç noktası küresel olarak İngilizce
+    // etiket kullanır; savunma sanayii ihracat haritasında şehir adlarının
+    // okunabilir olması şarttır.
     //
-    // `{s}` alt alan adı biçimi (a/b/c.tile...) OSM tarafından artık
-    // önerilmiyor — HTTP/2 üzerinden tek konak daha hızlı. Bu yüzden
-    // `subdomains` seçeneği de kaldırıldı.
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // NOT: Bu uç nokta API anahtarı İSTEMEZ. Anahtar isteyen (ve anahtarsız
+    // isteklerde filigran basan) sağlayıcılar CARTO'nun ticari "basemaps
+    // API" ürünleridir; aşağıdaki `basemaps.cartocdn.com/rastertiles/...`
+    // yolu ücretsiz genel CDN'dir.
+    //
+    // `{r}` retina soneki: Leaflet yüksek DPI ekranlarda otomatik olarak
+    // "@2x" koyar, normal ekranlarda boş bırakır.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors '
+        + '&copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20,
       // Döşemeler tekrarlanmaz; harita tek bir dünya gösterir.
       noWrap: true,
       bounds: L.latLngBounds([-85, -180], [85, 180]),
@@ -349,7 +360,20 @@ export function MapView() {
     <div className="map-shell">
       <div className="map-canvas" ref={containerRef} />
 
-      <div className="map-filter">
+      <div className={`map-filter${filtersOpen ? '' : ' is-collapsed'}`}>
+        <button
+          type="button"
+          className="map-filter-toggle"
+          onClick={() => setFiltersOpen(!filtersOpen)}
+          aria-expanded={filtersOpen}
+          aria-label={filtersOpen ? 'Filtre panelini daralt' : 'Filtre panelini aç'}
+          title={filtersOpen ? 'Daralt' : 'Filtreler'}
+        >
+          {filtersOpen ? <IconChevronDown size={15} /> : <IconChevronLeft size={15} />}
+          {!filtersOpen && <span className="map-filter-toggle-label">Filtre</span>}
+        </button>
+
+        <div className="map-filter-body">
         <div className="map-filter-title">Müşteri Tipi</div>
         <div className="flex gap-1 flex-wrap mb-3">
           {TYPE_FILTERS.map((item) => (
@@ -440,6 +464,7 @@ export function MapView() {
         >
           <IconRefresh size={13} /> Yenile
         </button>
+        </div>
       </div>
 
       <div className="map-legend">

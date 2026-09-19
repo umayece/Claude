@@ -19,7 +19,7 @@ export function Login() {
     return (
       <div className="login-shell">
         <MkeStar className="login-watermark" size={620} color="#ffffff" />
-        <span className="spinner spinner-lg" style={{ borderTopColor: 'var(--mke-teal)' }} />
+        <span className="spinner spinner-lg" style={{ borderTopColor: 'var(--mke-red)' }} />
       </div>
     );
   }

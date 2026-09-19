@@ -5,20 +5,24 @@
 
 :root {
   /* --- MKE Kurumsal Renk Standardı --- */
-  /* Derin askeri lacivert: sidebar, üst bar, birincil düğme, modal başlığı */
-  --mke-navy: #0A192F;
-  --mke-navy-soft: #13294B;
-  --mke-navy-deep: #060F1E;
-  --mke-navy-line: #1E3A5F;
+  /* Derin askeri lacivert: sidebar, üst bar, birincil düğme, modal başlığı.
+     Ana ton bir tık açıldı (#0F172A): #0A192F ile beyaz kart arasındaki
+     kontrast göz yoruyordu. */
+  --mke-navy: #0F172A;
+  --mke-navy-soft: #1E293B;
+  --mke-navy-deep: #0A192F;
+  --mke-navy-line: #2A3B52;
   /* Panel içi ikinci lacivert ton (kart üstü koyu yüzeyler) */
   --mke-navy-panel: #0D1F3C;
 
   /* Aksiyon rengi — MKE Kırmızısı. Yıkıcı değil, VURGU rengidir:
-     aktif sekme, birincil CTA, kritik rozet. */
-  --mke-red: #E31E24;
-  --mke-red-dark: #B8171C;
-  --mke-red-soft: rgba(227, 30, 36, 0.10);
-  --mke-red-mid: rgba(227, 30, 36, 0.20);
+     aktif sekme, birincil CTA, kritik rozet.
+     Saf #E31E24 lacivert üzerinde titreşiyordu; #DC2626 daha dengeli ve
+     WCAG kontrastını beyaz metinle karşılıyor. */
+  --mke-red: #DC2626;
+  --mke-red-dark: #B91C1C;
+  --mke-red-soft: rgba(220, 38, 38, 0.10);
+  --mke-red-mid: rgba(220, 38, 38, 0.20);
 
   /* Savunma sanayii bronz/altın — ikincil vurgu: madalya şeritleri,
      seçili satır kenarı, kurumsal ayraç. */
@@ -44,7 +48,7 @@
   /* Zemin ve yüzeyler.
      Çalışma alanı dümdüz beyaz değil, ferah bir buz mavisi-gri: beyaz
      kartlar zeminden ayrışır, "düz kağıt" hissi kalkar. */
-  --bg: #F4F7F9;
+  --bg: #F8FAFC;
   --surface: #ffffff;
   --surface-alt: #f1f5f9;
   --surface-sunken: #eef1f5;
@@ -88,7 +92,7 @@
   --shadow-md: 0 4px 14px 0 rgba(0, 0, 0, 0.05);
   --shadow-raise: 0 8px 30px -4px rgba(0, 40, 69, 0.10);
   --shadow-lg: 0 8px 12px -4px rgba(0, 40, 69, 0.08), 0 24px 56px -8px rgba(0, 40, 69, 0.18);
-  --shadow-focus: 0 0 0 3px rgba(227, 30, 36, 0.22);
+  --shadow-focus: 0 0 0 3px rgba(220, 38, 38, 0.22);
 
   --sidebar-w: 252px;
   --topbar-h: 62px;
@@ -911,12 +915,27 @@ tr:hover .row-actions { opacity: 1; }
 .kanban-stripe { height: 3px; border-radius: 3px 3px 0 0; }
 
 .kanban-card {
+  position: relative;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 10px 11px;
+  border-radius: var(--radius-sm);
+  /* Ferah iç boşluk: başlık, tutar ve tarih nefes alsın. */
+  padding: 12px;
   box-shadow: var(--shadow-sm); cursor: grab;
-  transition: box-shadow 0.16s var(--ease), transform 0.12s var(--ease);
+  /* Yalnızca renk ve gölge geçişi — transform YOK. */
+  transition: box-shadow 0.16s var(--ease), border-color 0.16s var(--ease);
 }
-.kanban-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+/*
+  Hover'da SADECE renk ve gölge değişir.
+
+  `transform: translateY()` her kartta düzen (layout) yeniden hesabı
+  tetikliyor, yüzlerce kartlı bir sütunda fare gezdirirken gözle görülür
+  takılma yaratıyordu. Kenarlık rengi ve gölge bileşik (composite)
+  katmanda kalır, ana iş parçacığını meşgul etmez.
+*/
+.kanban-card:hover {
+  border-color: #93c5fd;
+  box-shadow: var(--shadow-md);
+}
 .kanban-card:active { cursor: grabbing; }
 .kanban-card.dragging { opacity: 0.45; transform: rotate(1.5deg); }
 .kanban-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px;
@@ -1288,8 +1307,19 @@ tr:hover .row-actions { opacity: 1; }
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
-  overflow: hidden;
+  /*
+    DİKKAT: burada `overflow: hidden` KULLANILMAZ.
+
+    `overflow: hidden` her iki ekseni de gizler; ardından gelen
+    `overflow-x: auto` yalnızca yatay ekseni geri açar ve dikey eksen
+    GİZLİ kalır. Bu yüzden uzun tablolarda (ör. İhaleler) sayfa aşağı
+    kaydırılamıyor, alttaki satırlara erişilemiyordu.
+
+    Yatayda kaydırma, dikeyde sayfanın doğal akışı: tablo kendi
+    yüksekliğince büyür, kaydırma pencereye aittir.
+  */
   overflow-x: auto;
+  overflow-y: visible;
 }
 /* Kart içindeki tablo ikinci bir gölge katmanı oluşturmasın. */
 .card .table-wrap,
@@ -1618,3 +1648,321 @@ tr:hover .row-actions { opacity: 1; }
 }
 .tag-record-name { font-weight: 600; font-size: 13px; color: var(--text); }
 .tag-record-meta { font-size: 11.5px; color: var(--text-muted); }
+
+/* ==========================================================================
+   Harita filtre paneli — katlanabilir
+   --------------------------------------------------------------------------
+   Açıkken normal panel, kapalıyken ince dikey şerit. Genişlik ve opaklık
+   birlikte geçiş yapar; `display: none` kullanılsaydı geçiş olmaz, panel
+   birden yok olurdu.
+   ========================================================================== */
+
+.map-filter {
+  z-index: 1000;
+  transition: width 0.3s var(--ease), padding 0.3s var(--ease);
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.map-filter-toggle {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 4px 2px 8px;
+  border: 0; background: none; cursor: pointer;
+  color: var(--mke-navy); font-family: var(--font-display);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.map-filter-toggle:hover { color: var(--mke-red); }
+.map-filter-toggle-label { white-space: nowrap; }
+
+.map-filter-body {
+  opacity: 1;
+  transition: opacity 0.22s var(--ease);
+}
+
+/* Daraltılmış hâl: yalnızca ok + "Filtre" etiketi görünür. */
+.map-filter.is-collapsed {
+  min-width: 0;
+  width: 46px;
+  padding: 8px 6px;
+}
+.map-filter.is-collapsed .map-filter-body {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.map-filter.is-collapsed .map-filter-toggle {
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+.map-filter.is-collapsed .map-filter-toggle-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+}
+
+/* Harita lejandı kurumsal yoğunluk skalasıyla eşleşir. */
+.map-legend-bar {
+  background: linear-gradient(90deg, #0f2042, #1e408c, #2563eb, #d99828, #f59e0b);
+}
+
+/* ==========================================================================
+   İnce modern scrollbar
+   --------------------------------------------------------------------------
+   Kaba tarayıcı çubuğu yerine 4px'lik saydam bir şerit. Firefox
+   `scrollbar-width` ile, WebKit sözde elemanlarla ele alınır; ikisi de
+   desteklenmiyorsa tarayıcı kendi çubuğunu gösterir ve hiçbir şey kırılmaz.
+   ========================================================================== */
+
+.custom-scrollbar,
+.map-filter,
+.table-wrap,
+.dropdown-list,
+.cluster-list,
+.tag-list,
+.note-list,
+.drawer-left,
+.drawer-tab-body,
+.modal-body,
+.kanban-column-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar,
+.map-filter::-webkit-scrollbar,
+.table-wrap::-webkit-scrollbar,
+.dropdown-list::-webkit-scrollbar,
+.cluster-list::-webkit-scrollbar,
+.tag-list::-webkit-scrollbar,
+.note-list::-webkit-scrollbar,
+.drawer-left::-webkit-scrollbar,
+.drawer-tab-body::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar,
+.kanban-column-body::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+.map-filter::-webkit-scrollbar-track,
+.table-wrap::-webkit-scrollbar-track,
+.dropdown-list::-webkit-scrollbar-track,
+.cluster-list::-webkit-scrollbar-track,
+.tag-list::-webkit-scrollbar-track,
+.note-list::-webkit-scrollbar-track,
+.drawer-left::-webkit-scrollbar-track,
+.drawer-tab-body::-webkit-scrollbar-track,
+.modal-body::-webkit-scrollbar-track,
+.kanban-column-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.map-filter::-webkit-scrollbar-thumb,
+.table-wrap::-webkit-scrollbar-thumb,
+.dropdown-list::-webkit-scrollbar-thumb,
+.cluster-list::-webkit-scrollbar-thumb,
+.tag-list::-webkit-scrollbar-thumb,
+.note-list::-webkit-scrollbar-thumb,
+.drawer-left::-webkit-scrollbar-thumb,
+.drawer-tab-body::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb,
+.kanban-column-body::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.38);
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+.table-wrap::-webkit-scrollbar-thumb:hover,
+.note-list::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.62);
+}
+
+/* ==========================================================================
+   Sıralanabilir tablo başlıkları (üç durumlu)
+   ========================================================================== */
+
+.sort-th {
+  display: inline-flex; align-items: center; gap: 6px;
+  width: 100%; padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; color: inherit; text-transform: inherit;
+  letter-spacing: inherit; text-align: inherit;
+  transition: color 0.14s var(--ease);
+}
+.sort-th:hover { color: var(--mke-navy); }
+.sort-th.is-sorted { color: var(--mke-navy); }
+.sort-th:focus-visible { outline: 2px solid var(--mke-red); outline-offset: 2px; }
+
+.sort-icon { display: inline-flex; align-items: center; line-height: 1; }
+/* Soluk çift ok: kolonun sıralanabilir olduğunu belli eder ama
+   sıralı kolonla karışmaz. */
+.sort-icon.is-idle { opacity: 0.3; font-size: 12px; }
+.sort-th:hover .sort-icon.is-idle { opacity: 0.6; }
+
+.sort-icon.is-active { color: var(--mke-red); transition: transform 0.18s var(--ease); }
+/* Artan sırada ok yukarı bakar: aynı simge döndürülür, ikinci bir
+   ikon dosyası taşımaya gerek yok. */
+.sort-icon.is-active.asc { transform: rotate(180deg); }
+
+
+/* ==========================================================================
+   Fırsat kartı — üç nokta menüsü
+   ========================================================================== */
+
+.kanban-card-menu { position: absolute; top: 6px; right: 6px; }
+
+.kanban-menu-trigger {
+  display: grid; place-items: center;
+  width: 26px; height: 26px; padding: 0;
+  border: 0; background: none; border-radius: var(--radius-btn);
+  color: var(--text-faint); cursor: pointer;
+  opacity: 0; transition: opacity 0.14s var(--ease), background 0.14s var(--ease);
+}
+/* Menü düğmesi yalnızca kart üzerine gelince belirir: sütun dolduğunda
+   yüzlerce simge birden görünmez. Klavye odağında da açılır. */
+.kanban-card:hover .kanban-menu-trigger,
+.kanban-menu-trigger:focus-visible { opacity: 1; }
+.kanban-menu-trigger:hover { background: var(--surface-alt); color: var(--mke-navy); }
+
+.kanban-menu {
+  position: absolute; top: 28px; right: 0; z-index: 40;
+  min-width: 178px; padding: 5px;
+  background: var(--surface); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-raise);
+}
+
+.kanban-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 9px;
+  border: 0; background: none; border-radius: var(--radius-btn);
+  font-family: inherit; font-size: 12.5px; color: var(--text);
+  text-align: left; cursor: pointer;
+}
+.kanban-menu-item:hover { background: var(--row-hover); }
+.kanban-menu-item.is-danger { color: var(--danger); }
+.kanban-menu-item.is-danger:hover { background: var(--danger-bg); }
+
+.kanban-menu-field {
+  padding: 6px 9px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.kanban-menu-field .field-label { margin-bottom: 3px; }
+
+/* Kart alt satırı: tutar rozeti ve tarih ferah dursun. */
+.kanban-card-foot { margin-top: 8px; }
+.kanban-card-amount {
+  font-family: var(--font-display);
+  font-size: 14px; font-weight: 700; color: var(--mke-navy);
+}
+
+/* ==========================================================================
+   Taslak bildirimi ve otomatik kaydetme göstergesi
+   ========================================================================== */
+
+.draft-banner {
+  display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
+  padding: 11px 14px; margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning);
+  box-shadow: inset 3px 0 0 var(--mke-gold);
+  font-size: 13px;
+}
+.draft-banner-text { flex: 1; min-width: 180px; }
+.draft-banner-time { color: var(--text-muted); font-weight: 500; }
+.draft-banner-actions { display: flex; gap: 6px; margin-left: auto; }
+
+.draft-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--text-faint);
+}
+.draft-status.is-error { color: var(--danger); }
+
+/* ==========================================================================
+   AI çıktısı — yapılandırılmış blok görünümü
+   --------------------------------------------------------------------------
+   Kuru paragraf yerine: numaralı aksiyon adımları, tonuna göre renklenen
+   madde işaretleri. Renk anlamı taşır — kırmızı risk, yeşil fırsat.
+   ========================================================================== */
+
+.ai-output { white-space: normal; }
+/* Düz metin satırları hâlâ satır sonlarını korumalı. */
+.ai-output > div { white-space: pre-wrap; }
+
+.ai-bullet {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 4px 0 4px 2px;
+  white-space: normal;
+}
+.ai-bullet-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  margin-top: 8px; background: var(--text-faint);
+}
+.ai-bullet-body { flex: 1; min-width: 0; white-space: pre-wrap; }
+
+.ai-bullet.is-risk .ai-bullet-dot { background: var(--danger); }
+.ai-bullet.is-good .ai-bullet-dot { background: var(--success); }
+.ai-bullet.is-warn .ai-bullet-dot { background: var(--warning); }
+.ai-bullet.is-risk { color: #7f1d1d; }
+.ai-bullet.is-good { color: #14532d; }
+
+.ai-step {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0; white-space: normal;
+}
+.ai-step-no {
+  display: grid; place-items: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--mke-navy); color: #fff;
+  font-family: var(--font-display); font-size: 12px; font-weight: 700;
+}
+.ai-step-body { flex: 1; min-width: 0; white-space: pre-wrap; padding-top: 1px; }
+
+/* Geniş sayfa kabı: AI ve hesaplayıcı ekranları kenarlara yapışmasın. */
+.page-wide { width: 100%; max-width: 1280px; margin: 0 auto; }
+
+/* ==========================================================================
+   Kontrast yumuşatma
+   --------------------------------------------------------------------------
+   Lacivert ile kırmızının doğrudan bindiği yerler gözü yoruyordu. Aktif
+   menü öğesi artık koyu zemin üzerinde daha yumuşak bir kırmızı ve ince
+   altın şeritle ayrılıyor; sidebar ile içerik arasında da bir ayraç var.
+   ========================================================================== */
+
+.sidebar {
+  background: linear-gradient(180deg, var(--mke-navy) 0%, var(--mke-navy-deep) 100%);
+  border-right: 1px solid rgba(197, 160, 89, 0.18);
+}
+
+.nav-item.active,
+.nav-item.active:hover {
+  background: var(--mke-red-dark);
+  color: #ffffff;
+  box-shadow: inset 3px 0 0 var(--mke-gold), 0 2px 10px -3px rgba(185, 28, 28, 0.55);
+}
+
+/* Menü bölüm başlıkları biraz daha soluk: hiyerarşi görünsün. */
+.sidebar-section { color: #64809f; }
+
+/* Kartlar ince kenarlıkla geri gelir: gölge tek başına açık zeminde
+   kartın sınırını belirsiz bırakıyordu. */
+.card,
+.kpi {
+  border: 1px solid #e2e8f0;
+}
+.table-wrap { border: 1px solid #e2e8f0; }
+
+/* Üst barın altında kırmızı-altın yerine yalnız ince altın: iki güçlü
+   renk yan yana gelince şerit "uyarı çubuğu" gibi okunuyordu. */
+.topbar {
+  border-bottom: 1px solid rgba(197, 160, 89, 0.25);
+  box-shadow: none;
+}
+
+/* Kırmızı düğme gölgesi de yumuşatıldı. */
+.btn-accent:hover:not(:disabled) { box-shadow: 0 4px 12px -4px rgba(220, 38, 38, 0.4); }

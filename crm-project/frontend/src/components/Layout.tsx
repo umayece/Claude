@@ -64,7 +64,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: '/activities', label: 'Aktiviteler & Fuarlar', icon: <IconFlag size={17} />, permission: 'activity:read' },
       { to: '/protocol', label: 'Protokol & Heyet', icon: <IconShield size={17} />, permission: 'protocol:read' },
-      { to: '/documents', label: 'Belge Deposu', icon: <IconArchive size={17} />, permission: 'document:read' },
+      { to: '/documents', label: 'Belge Arşivi', icon: <IconArchive size={17} />, permission: 'document:read' },
     ],
   },
   {

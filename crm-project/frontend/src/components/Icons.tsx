@@ -157,3 +157,9 @@ export const IconTarget = (p: IconProps) => (
 export const IconFlag = (p: IconProps) => (
   <Icon {...p}><path d="M4 22V4a1 1 0 0 1 1-1h10l-1.5 4L15 11H5" /></Icon>
 );
+export const IconMore = (p: IconProps) => (
+  <Icon {...p}><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></Icon>
+);
+export const IconPallet = (p: IconProps) => (
+  <Icon {...p}><path d="M3 17h18M3 21h18M6 17v4M12 17v4M18 17v4" /><rect x="5" y="4" width="14" height="9" rx="1" /></Icon>
+);

@@ -8,9 +8,14 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { Modal } from '../components/Modal';
 import { Pagination } from '../components/Pagination';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
+import { SortableTh, useTriStateSort } from '../components/SortableTh';
+import { DraftBanner, DraftStatusLine } from '../components/DraftBanner';
+import { useDraftAutosave } from '../hooks/useDraftAutosave';
 import { IconFile, IconPlus, IconSearch, IconTrash } from '../components/Icons';
 import { INCOTERMS } from '../types';
-import type { Company, CurrencyCode, Offer, Paginated, Product } from '../types';
+import type {
+  Company, Contact, CurrencyCode, Offer, Paginated, Product,
+} from '../types';
 
 const OFFER_STATUSES = ['Taslak', 'Gönderildi', 'Revize', 'Kabul', 'Ret', 'Süresi Doldu'] as const;
 // USD ilk sırada: savunma sanayii satışları ağırlıklı dövizlidir.
@@ -74,6 +79,19 @@ export function Offers() {
   const [pageSize, setPageSize] = useLocalStorage('crm:offers:pageSize', 25);
 
   const [result, setResult] = useState<Paginated<Offer> | null>(null);
+  const { sort, toggle: toggleSort, toQuery: sortQuery } = useTriStateSort();
+  // Teklif kuruma VEYA kişiye kesilebilir; kişi listesi ayrıca aranır.
+  const [contactOptions, setContactOptions] = useState<SelectOption[]>([]);
+  const [contactTerm, setContactTerm] = useState('');
+
+  /*
+    Teklif formu taslağı.
+
+    Teklif formu uzundur (kalemler, maliyet, Incoterms); sekme kapanırsa
+    veya sayfa yenilenirse yazılanlar kaybolurdu. Taslak otomatik
+    UYGULANMAZ — kullanıcı bildirimden "Yükle" derse uygulanır.
+  */
+  const draftStore = useDraftAutosave<OfferForm>('offer:new', EMPTY_OFFER, { enabled: formOpen });
   const [detail, setDetail] = useState<Offer | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +105,37 @@ export function Offers() {
   const [companyTerm, setCompanyTerm] = useState('');
   const debouncedCompanyTerm = useDebounce(companyTerm, 300);
 
+  const debouncedContactTerm = useDebounce(contactTerm, 300);
   const debouncedTerm = useDebounce(term, 350);
+
+  /**
+   * Kişi araması.
+   *
+   * Tüm kişiler baştan yüklenmez: bağımsız kişiler dahil liste binlerce
+   * kayda ulaşabilir. En az iki harf yazıldığında sunucudan aranır.
+   */
+  useEffect(() => {
+    if (debouncedContactTerm.trim().length < 2) {
+      setContactOptions([]);
+      return;
+    }
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await api.get<Paginated<Contact>>(
+          '/contacts', { q: debouncedContactTerm, pageSize: 20 }, controller.signal,
+        );
+        setContactOptions(response.data.map((row) => ({
+          value: row.id,
+          label: `${row.firstName} ${row.lastName}`,
+          description: row.company?.name ?? `${row.contactType} · bağımsız`,
+        })));
+      } catch {
+        // Arama başarısızsa liste boş kalır; kullanıcı kurum seçebilir.
+      }
+    })();
+    return () => controller.abort();
+  }, [debouncedContactTerm]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -95,7 +143,12 @@ export function Offers() {
     try {
       const response = await api.get<Paginated<Offer>>(
         '/offers',
-        { page, pageSize, q: debouncedTerm || undefined, status: statusFilter || undefined },
+        {
+          page, pageSize,
+          q: debouncedTerm || undefined,
+          status: statusFilter || undefined,
+          sort: sortQuery(),
+        },
         signal,
       );
       setResult(response);
@@ -105,7 +158,7 @@ export function Offers() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, statusFilter]);
+  }, [page, pageSize, debouncedTerm, statusFilter, sortQuery]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -224,15 +277,22 @@ export function Offers() {
    * devlete aittir, kâr değildir.
    */
   const margin = useMemo(() => {
-    const revenueTry = toTry(totals.subtotal, form.currency);
-    const costTry = toTry(totals.costTotal, form.costCurrency);
-    const profitTry = revenueTry - costTry;
+    // Maliyeti teklifin para birimine çevir (TL üzerinden köprüleyerek).
+    // Aynı para birimindeyse çevrim yapılmaz: gereksiz kur hatası girmez.
+    const costInOfferCurrency = form.costCurrency === form.currency
+      ? totals.costTotal
+      : toTry(totals.costTotal, form.costCurrency) / (toTry(1, form.currency) || 1);
+
+    const profit = totals.subtotal - costInOfferCurrency;
+
     return {
-      revenueTry,
-      costTry,
-      profitTry,
+      revenue: totals.subtotal,
+      cost: costInOfferCurrency,
+      profit,
       // Ciro sıfırken marj tanımsızdır; 0 göstermek "sıfır kâr" yanılgısı yaratır.
-      percent: revenueTry > 0 ? (profitTry / revenueTry) * 100 : null,
+      percent: totals.subtotal > 0 ? (profit / totals.subtotal) * 100 : null,
+      // İkincil: TL karşılığı, kur farkını merak eden için.
+      profitTry: toTry(totals.subtotal, form.currency) - toTry(totals.costTotal, form.costCurrency),
     };
   }, [totals.subtotal, totals.costTotal, form.currency, form.costCurrency, toTry]);
 
@@ -259,9 +319,19 @@ export function Offers() {
     });
   };
 
+  // Form her değiştiğinde taslağa yazılır (kanca kendi içinde geciktirir).
+  useEffect(() => {
+    if (formOpen) draftStore.setDraft(form);
+    // `draftStore` her render'da yeni nesne olduğundan bağımlılığa
+    // konulmaz; yalnızca form içeriği değişince yazmak istiyoruz.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, formOpen]);
+
   const saveOffer = async (): Promise<void> => {
-    if (!form.companyId) {
-      setFormError('Müşteri seçimi zorunludur.');
+    // Kurum VEYA kişi: en az biri gerekli. Bağımsız aracıya kesilen
+    // teklifte kurum yoktur.
+    if (!form.companyId && !form.contactId) {
+      setFormError('Teklif bir kuruma veya bir kişiye kesilmelidir.');
       return;
     }
     const validItems = form.items.filter((item) => item.name.trim());
@@ -301,6 +371,8 @@ export function Offers() {
 
       setFormOpen(false);
       setForm(EMPTY_OFFER);
+      // Kayıt başarılı: taslak artık gereksiz.
+      draftStore.clearDraft();
       await load();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Teklif kaydedilemedi.');
@@ -377,8 +449,19 @@ export function Offers() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Teklif No</th><th>Başlık</th><th>Müşteri</th><th>Durum</th>
-                    <th className="text-right">Tutar</th><th>Geçerlilik</th>
+                    <th>Teklif No</th>
+                    <SortableTh field="title" sort={sort} onToggle={toggleSort}>Başlık</SortableTh>
+                    <th>Müşteri</th>
+                    <th>Durum</th>
+                    <SortableTh
+                      field="total" sort={sort} onToggle={toggleSort}
+                      align="right" className="text-right"
+                    >
+                      Tutar
+                    </SortableTh>
+                    <SortableTh field="validUntil" sort={sort} onToggle={toggleSort}>
+                      Geçerlilik
+                    </SortableTh>
                   </tr>
                 </thead>
                 <tbody>
@@ -429,20 +512,37 @@ export function Offers() {
         closeOnBackdrop={false}
         footer={
           <>
-            <span className="text-sm ml-auto" style={{ marginRight: 'auto' }}>
-              Genel Toplam: <strong>{format(totals.total, form.currency)}</strong>
+            <span
+              className="text-sm ml-auto"
+              style={{ marginRight: 'auto', display: 'flex', flexDirection: 'column' }}
+            >
+              <span>Genel Toplam: <strong>{format(totals.total, form.currency)}</strong></span>
+              <DraftStatusLine status={draftStore.status} lastSavedAt={draftStore.lastSavedAt} />
             </span>
             <button type="button" className="btn" onClick={() => setFormOpen(false)}>Vazgeç</button>
             <button
               type="button" className="btn btn-primary"
               onClick={() => void saveOffer()}
-              disabled={saving || form.title.trim().length < 2 || !form.companyId}
+              disabled={
+                saving || form.title.trim().length < 2
+                || (!form.companyId && !form.contactId)
+              }
             >
               {saving && <span className="spinner" />} Teklifi Kaydet
             </button>
           </>
         }
       >
+        <DraftBanner
+          visible={draftStore.pendingDraft !== null}
+          savedAt={draftStore.pendingSavedAt}
+          onRestore={() => {
+            if (draftStore.pendingDraft) setForm(draftStore.pendingDraft);
+            draftStore.restoreDraft();
+          }}
+          onDiscard={draftStore.discardDraft}
+        />
+
         {formError && <div className="alert alert-danger">{formError}</div>}
 
         {form.dealId && (
@@ -465,16 +565,45 @@ export function Offers() {
           </div>
 
           <div className="field">
-            <label className="field-label" htmlFor="of-company">Müşteri<span className="req">*</span></label>
+            <label className="field-label" htmlFor="of-company">Kurum</label>
             <SearchableSelect
               id="of-company"
               options={companyOptions}
               value={form.companyId}
               onChange={(value) => setForm((prev) => ({ ...prev, companyId: value }))}
               onSearch={setCompanyTerm}
-              placeholder="Müşteri seçiniz…"
+              placeholder="Kurum seçiniz (isteğe bağlı)…"
+              clearable
             />
           </div>
+        </div>
+
+        {/*
+          Kişi seçici.
+
+          Teklif doğrudan bir kişiye de kesilebilir: bağımsız danışman,
+          aracı veya komisyoncunun kurumu çoğu zaman sistemde yoktur.
+          Kurum ve kişiden EN AZ BİRİ dolu olmalıdır.
+        */}
+        <div className="field">
+          <label className="field-label" htmlFor="of-contact">
+            Kişi <span className="text-faint">(kurum yoksa zorunlu)</span>
+          </label>
+          <SearchableSelect
+            id="of-contact"
+            options={contactOptions}
+            value={form.contactId}
+            onChange={(value) => setForm((prev) => ({ ...prev, contactId: value }))}
+            onSearch={setContactTerm}
+            placeholder="Kişi arayın (en az 2 harf)…"
+            clearable
+            emptyText="Eşleşen kişi yok. Kişiler ekranından bağımsız kişi ekleyebilirsiniz."
+          />
+          {!form.companyId && !form.contactId && (
+            <span className="text-xs" style={{ color: 'var(--warning)' }}>
+              Teklif bir kuruma veya bir kişiye kesilmelidir.
+            </span>
+          )}
         </div>
 
         <div className="grid grid-3" style={{ gap: 0, columnGap: 14 }}>
@@ -652,7 +781,11 @@ export function Offers() {
             <div className="kpi-value" style={{ fontSize: 18 }}>
               {format(totals.costTotal, form.costCurrency)}
             </div>
-            <div className="kpi-sub">≈ {format(margin.costTry, 'TRY')}</div>
+            {form.costCurrency !== form.currency && (
+              <div className="kpi-sub">
+                ≈ {format(margin.cost, form.currency)} (teklif para biriminde)
+              </div>
+            )}
           </div>
 
           <div className="kpi">
@@ -661,12 +794,17 @@ export function Offers() {
               className="kpi-value"
               style={{
                 fontSize: 18,
-                color: margin.profitTry >= 0 ? 'var(--success)' : 'var(--danger)',
+                color: margin.profit >= 0 ? 'var(--success)' : 'var(--danger)',
               }}
             >
-              {format(margin.profitTry, 'TRY')}
+              {margin.profit >= 0 ? '+' : ''}{format(margin.profit, form.currency)}
             </div>
-            <div className="kpi-sub">Net satış ≈ {format(margin.revenueTry, 'TRY')}</div>
+            <div
+              className="kpi-sub"
+              title="Kur dalgalanmasını görmek için ikincil gösterim"
+            >
+              ≈ {format(margin.profitTry, 'TRY')}
+            </div>
           </div>
 
           <div className="kpi">
@@ -683,7 +821,9 @@ export function Offers() {
               {margin.percent === null ? '—' : `%${margin.percent.toFixed(1)}`}
             </div>
             <div className="kpi-sub">
-              {margin.percent === null ? 'Satış tutarı girilmedi' : 'Anlık kurla hesaplandı'}
+              {margin.percent === null
+                ? 'Satış tutarı girilmedi'
+                : `(Satış − Maliyet) / Satış · ${form.currency}`}
             </div>
           </div>
         </div>
@@ -777,17 +917,19 @@ export function Offers() {
                 {detail.margin && (
                   <div className="dual-amount mt-1">
                     <span className="dual-secondary">
-                      Maliyet: {format(detail.costTotal, detail.costCurrency)}
+                      Maliyet: {format(detail.margin.cost, detail.margin.currency)}
                     </span>
                     <span
                       className="dual-secondary"
                       style={{
-                        color: detail.margin.grossProfitTry >= 0
+                        color: detail.margin.grossProfit >= 0
                           ? 'var(--success)' : 'var(--danger)',
                         fontWeight: 600,
                       }}
+                      title={`TL karşılığı: ${format(detail.margin.grossProfitTry, 'TRY')}`}
                     >
-                      Brüt kâr: {format(detail.margin.grossProfitTry, 'TRY')}
+                      Brüt kâr: {detail.margin.grossProfit >= 0 ? '+' : ''}
+                      {format(detail.margin.grossProfit, detail.margin.currency)}
                       {detail.margin.marginPercent !== null
                         && ` (%${detail.margin.marginPercent.toFixed(1)})`}
                     </span>

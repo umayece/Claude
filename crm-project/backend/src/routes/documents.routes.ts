@@ -28,8 +28,18 @@ export const DOCUMENT_CATEGORIES = [
 export const CLASSIFICATIONS = ['Tasnif Dışı', 'Hizmete Özel', 'Gizli'] as const;
 
 // Dosya içeriği veritabanında tutulduğu için sınır dar tutulur.
-// Express gövde sınırı 10 MB; base64 ~%33 şişirdiğinden net sınır 7 MB.
-const MAX_FILE_BYTES = 7 * 1024 * 1024;
+// Express gövde sınırı 140 MB; base64 ~%33 şişirdiğinden net sınır 100 MB.
+/**
+ * Dosya boyutu üst sınırı.
+ *
+ * Yapay 7 MB sınırı kaldırıldı: stratejik pazarlama raporları ve brifing
+ * sunumları bunu rahatlıkla aşıyor ve kullanıcı yükleyemiyordu. Sınır
+ * artık gövde sınırıyla uyumlu 100 MB.
+ *
+ * NOT: base64 kodlama ham boyutu ~%33 şişirir, bu yüzden Express gövde
+ * sınırı (bkz. app.ts) bu değerin ~1.4 katı olmalıdır.
+ */
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 /** Tarayıcıda çalıştırılabilen/riskli türler bilinçli olarak kabul edilmez. */
 const ALLOWED_MIME = new Set([

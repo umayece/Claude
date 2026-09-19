@@ -76,7 +76,15 @@ export function createApp(): Express {
   );
 
   // Avatar ve şartname metinleri büyük olabilir; sınır bilinçli yükseltildi.
-  app.use(express.json({ limit: '10mb' }));
+  /*
+    Gövde sınırı.
+
+    Belge yükleme base64 ile yapılır ve base64 ham boyutu ~%33 şişirir:
+    100 MB'lık bir dosya ~134 MB gövde demektir. Sınır buna göre
+    ayarlanmalı, aksi halde sunucu isteği daha Zod'a ulaşmadan reddeder
+    ve kullanıcı sebebi anlaşılmayan bir hata görür.
+  */
+  app.use(express.json({ limit: '140mb' }));
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
   app.use(cookieParser());
 

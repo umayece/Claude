@@ -297,6 +297,30 @@ function FormattedAiText({ text }: { text: string }) {
 
       if (line.trim() === '') return <br key={key} />;
 
+      // "1. Adım" — numaralı aksiyon adımı
+      const numbered = /^(\d+)[.)]\s+(.*)$/.exec(line.trim());
+      if (numbered?.[1] && numbered[2]) {
+        return (
+          <div key={key} className="ai-step">
+            <span className="ai-step-no">{numbered[1]}</span>
+            <span className="ai-step-body"><RiskAwareLine line={numbered[2]} /></span>
+          </div>
+        );
+      }
+
+      // "- madde" — tonuna göre renklenen madde işareti
+      const bullet = /^\s*[-•*]\s+(.*)$/.exec(line);
+      if (bullet?.[1]) {
+        const body = bullet[1];
+        const tone = bulletTone(body);
+        return (
+          <div key={key} className={`ai-bullet ${tone}`}>
+            <span className="ai-bullet-dot" aria-hidden="true" />
+            <span className="ai-bullet-body"><RiskAwareLine line={body} /></span>
+          </div>
+        );
+      }
+
       return (
         <div key={key}>
           <RiskAwareLine line={line} />
@@ -306,6 +330,25 @@ function FormattedAiText({ text }: { text: string }) {
   }, [text]);
 
   return <>{blocks}</>;
+}
+
+/**
+ * Madde işaretinin tonunu metinden çıkarır.
+ *
+ * Kuru bir liste yerine riskler kırmızı, fırsatlar yeşil görünür. Eşleşme
+ * anahtar kelimeye dayalı ve kasıtlı olarak basittir; tanımadığı satırı
+ * nötr bırakır — yanlış renklendirmektense renksiz bırakmak yeğdir.
+ */
+function bulletTone(text: string): 'is-risk' | 'is-good' | 'is-warn' | '' {
+  const lower = text.toLocaleLowerCase('tr');
+  if (/gecikt|kayb|risk|reddedil|engel|iptal|eksik|uyar|kritik|süresi doldu/.test(lower)) {
+    return 'is-risk';
+  }
+  if (/kazanıl|onayland|tamamland|artış|fırsat|başarı|hazır|sıcak/.test(lower)) {
+    return 'is-good';
+  }
+  if (/bekliyor|beklemede|yaklaş|inceleniyor|takip/.test(lower)) return 'is-warn';
+  return '';
 }
 
 /** [YÜKSEK] / [ORTA] / [DÜŞÜK] risk etiketlerini renklendirir. */

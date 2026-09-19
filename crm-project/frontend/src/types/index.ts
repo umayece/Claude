@@ -253,20 +253,31 @@ export interface OfferItem {
   sortOrder: number;
 }
 
-/** Teklif kârlılığı — sunucuda anlık kurla hesaplanır. */
+/**
+ * Teklif kârlılığı.
+ *
+ * Ana rapor TEKLİFİN KENDİ para birimindedir (`currency`, `revenue`,
+ * `cost`, `grossProfit`). TL karşılıkları ikincil bilgidir ve yalnızca
+ * karşılaştırma için gösterilir.
+ */
 export interface OfferMargin {
+  currency: CurrencyCode;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  /** Ciro sıfırken marj tanımsızdır. */
+  marginPercent: number | null;
   revenueTry: number;
   costTry: number;
   grossProfitTry: number;
-  /** Ciro sıfırken marj tanımsızdır. */
-  marginPercent: number | null;
 }
 
 export interface Offer {
   id: string;
   offerNumber: string;
   title: string;
-  companyId: string;
+  /** Kişiye kesilen tekliflerde null olur. */
+  companyId: string | null;
   contactId: string | null;
   dealId: string | null;
   status: string;

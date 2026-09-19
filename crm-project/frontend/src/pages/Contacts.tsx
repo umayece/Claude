@@ -9,6 +9,7 @@ import { Pagination } from '../components/Pagination';
 import { ContactDetailModal } from '../components/ContactDetailModal';
 import { IconEdit, IconGift, IconPlus, IconSearch, IconTrash, IconUsers } from '../components/Icons';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
+import { SortableTh, useTriStateSort } from '../components/SortableTh';
 import { CONTACT_TYPES } from '../types';
 import type { Contact, Paginated } from '../types';
 
@@ -41,6 +42,7 @@ export function Contacts() {
   const [pageSize, setPageSize] = useLocalStorage('crm:contacts:pageSize', 25);
 
   const [result, setResult] = useState<Paginated<Contact> | null>(null);
+  const { sort, toggle: toggleSort, toQuery: sortQuery } = useTriStateSort();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,6 +65,7 @@ export function Contacts() {
           contactType: typeFilter || undefined,
           standalone: standaloneFilter || undefined,
           birthMonth: birthMonthFilter || undefined,
+          sort: sortQuery(),
         },
         signal,
       );
@@ -73,7 +76,10 @@ export function Contacts() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, companyIdFilter, birthMonthFilter, typeFilter, standaloneFilter]);
+  }, [
+    page, pageSize, debouncedTerm, companyIdFilter, birthMonthFilter,
+    typeFilter, standaloneFilter, sortQuery,
+  ]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -208,10 +214,10 @@ export function Contacts() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Kişi</th>
-                    <th>Tür</th>
+                    <SortableTh field="lastName" sort={sort} onToggle={toggleSort}>Kişi</SortableTh>
+                    <SortableTh field="contactType" sort={sort} onToggle={toggleSort}>Tür</SortableTh>
                     <th>Kurum</th>
-                    <th>Konum</th>
+                    <SortableTh field="country" sort={sort} onToggle={toggleSort}>Konum</SortableTh>
                     <th>Telefonlar</th>
                     <th>Doğum Günü</th>
                     <th className="col-actions">İşlem</th>

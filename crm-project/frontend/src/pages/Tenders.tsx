@@ -11,6 +11,9 @@ import { PipelineBar } from '../components/PipelineBar';
 import { SearchableSelect, type SelectOption } from '../components/SearchableSelect';
 import { AiAssistant } from '../components/AiAssistant';
 import { useDeleteConfirm } from '../components/ConfirmDialog';
+import { DraftBanner } from '../components/DraftBanner';
+import { useDraftAutosave } from '../hooks/useDraftAutosave';
+import { SortableTh, useTriStateSort } from '../components/SortableTh';
 import { ScoreBadge, LOSS_REASONS } from './Deals';
 import {
   IconAlert, IconEdit, IconGavel, IconPlus, IconSearch, IconSparkles, IconTrash,
@@ -60,10 +63,14 @@ export function Tenders() {
   const [pageSize, setPageSize] = useLocalStorage('crm:tenders:pageSize', 25);
 
   const [result, setResult] = useState<Paginated<Tender> | null>(null);
+  const { sort, toggle: toggleSort, toQuery: sortQuery } = useTriStateSort();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
+  /* Form taslağı: sekme kapanırsa yazılanlar kaybolmasın.
+     Taslak otomatik uygulanmaz; kullanıcı bildirimden yükler. */
+  const draftStore = useDraftAutosave<FormState>('tender:new', EMPTY, { enabled: formOpen });
   const [editing, setEditing] = useState<Tender | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -87,6 +94,7 @@ export function Tenders() {
           q: debouncedTerm || undefined,
           status: statusFilter || undefined,
           scope: scopeFilter || undefined,
+          sort: sortQuery(),
         },
         signal,
       );
@@ -97,7 +105,7 @@ export function Tenders() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, debouncedTerm, statusFilter, scopeFilter]);
+  }, [page, pageSize, debouncedTerm, statusFilter, scopeFilter, sortQuery]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -173,6 +181,12 @@ export function Tenders() {
     setFormOpen(true);
   }
 
+  // Form değiştikçe taslağa yazılır (kanca geciktirir).
+  useEffect(() => {
+    if (formOpen) draftStore.setDraft(form);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, formOpen]);
+
   const save = async (): Promise<void> => {
     if (!form.companyId) {
       setFormError('İdare / kurum seçimi zorunludur.');
@@ -202,6 +216,8 @@ export function Tenders() {
       else await api.post('/tenders', payload);
 
       setFormOpen(false);
+      // Kayıt başarılı: taslak artık gereksiz.
+      draftStore.clearDraft();
       if (id) navigate('/tenders', { replace: true });
       await load();
     } catch (err) {
@@ -311,12 +327,19 @@ export function Tenders() {
                 <thead>
                   <tr>
                     <th>İhale No</th>
-                    <th>Başlık</th>
+                    <SortableTh field="title" sort={sort} onToggle={toggleSort}>Başlık</SortableTh>
                     <th>İdare</th>
                     <th>Durum</th>
-                    <th className="text-right">Yaklaşık Bedel</th>
+                    <SortableTh
+                      field="estimatedValue" sort={sort} onToggle={toggleSort}
+                      align="right" className="text-right"
+                    >
+                      Yaklaşık Bedel
+                    </SortableTh>
                     <th className="text-right">Skor</th>
-                    <th>Son Teklif</th>
+                    <SortableTh field="submissionDeadline" sort={sort} onToggle={toggleSort}>
+                      Son Teklif
+                    </SortableTh>
                     <th className="col-actions">İşlem</th>
                   </tr>
                 </thead>
@@ -456,6 +479,16 @@ export function Tenders() {
           </>
         }
       >
+        <DraftBanner
+          visible={draftStore.pendingDraft !== null}
+          savedAt={draftStore.pendingSavedAt}
+          onRestore={() => {
+            if (draftStore.pendingDraft) setForm(draftStore.pendingDraft);
+            draftStore.restoreDraft();
+          }}
+          onDiscard={draftStore.discardDraft}
+        />
+
         {formError && <div className="alert alert-danger">{formError}</div>}
 
         {editing && (

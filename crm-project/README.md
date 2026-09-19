@@ -241,17 +241,21 @@ MKE yurt dışı pazarlarda da çalıştığı için konum modeli Türkiye'ye ba
 
 #### Harita karoları
 
-Karolar **anahtarsız, ücretsiz** resmî OpenStreetMap sunucusundan gelir:
+Karolar **anahtarsız, ücretsiz** CARTO Voyager CDN'inden gelir:
 
 ```
-https://tile.openstreetmap.org/{z}/{x}/{y}.png
+https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png
 ```
 
-Bu URL **değiştirilmemelidir**. Carto, Mapbox, Stadia gibi sağlayıcılar
-anahtar ister ve anahtarsız isteklerde karoların üzerine
-"API KEY REQUIRED" filigranı basar. Depoda hiçbir Carto referansı yoktur.
-`{s}` alt alan adı biçimi de kullanılmaz — OSM artık HTTP/2 üzerinden tek
-konağı öneriyor.
+**Neden OSM değil:** standart OSM karolarında etiketler yerel dilde basılır
+(Arapça, Yunanca, Rusça). Savunma sanayii ihracat haritasında şehir ve ülke
+adlarının okunabilir olması şarttır; CARTO'nun bu uç noktası küresel olarak
+İngilizce etiket kullanır.
+
+**Anahtar gerekmez.** Filigran basan sağlayıcılar CARTO'nun ticari
+"basemaps API" ürünleridir; `basemaps.cartocdn.com/rastertiles/...` yolu
+ücretsiz genel CDN'dir. `{r}` retina sonekidir — Leaflet yüksek DPI
+ekranlarda `@2x` koyar, normal ekranlarda boş bırakır.
 
 #### Marker kümeleme
 
@@ -674,3 +678,176 @@ sorusu genel fırsat toplamına düşerdi.
 "En büyük iş" sıralaması ham `amount` ile yapılmaz — aday küme **anlık
 kurla TL'ye çevrilip** sıralanır; aksi halde 100.000 TRY, 90.000 USD'nin
 üstüne çıkardı.
+
+
+---
+
+## Bu turdaki düzeltmeler
+
+### Tabloların dikeyde kaydırılamaması (İhaleler)
+
+Kök neden CSS'teydi:
+
+```css
+.table-wrap { overflow: hidden; overflow-x: auto; }
+```
+
+`overflow: hidden` **iki ekseni de** gizler; sonraki `overflow-x: auto`
+yalnızca yatay ekseni geri açar ve dikey eksen **gizli kalır**. Uzun
+tablolarda alttaki satırlara erişilemiyordu. Doğrusu:
+
+```css
+.table-wrap { overflow-x: auto; overflow-y: visible; }
+```
+
+Yatayda kaydırma tabloya, dikeyde kaydırma sayfaya aittir.
+
+### Üç durumlu sıralama
+
+`SortableTh` + `useTriStateSort` (`components/SortableTh.tsx`). Döngü:
+**artan → azalan → varsayılan**. Üçüncü tıklama sıralamayı kaldırır ve
+liste sunucunun doğal sırasına döner; iki durumlu sıralamada kullanıcı
+"sırasız hâle" bir daha dönemez, sayfayı yenilemek zorunda kalır.
+
+Sunucu sözleşmesi `-alan` (azalan) / `alan` (artan); varsayılanda
+parametre **hiç gönderilmez**. Bağlı sayfalar: İhaleler, Şirketler,
+Kişiler, Teklifler. Kişiler rotasına sıralama desteği yeni eklendi.
+
+### Kişi ve not ekleme hataları
+
+"Beklenmeyen bir hata oluştu" mesajı hata kodunu gizliyordu. İki yönlü
+düzeltme:
+
+- **Doğrulama sağlamlaştırıldı.** Temizlenen bir seçici `null` değil `""`
+  gönderir; düz `z.string().uuid().nullish()` bunu reddediyordu. `companyId`,
+  `contactId`, `dealId`, ülke/ülke kodu, koordinat ve doğum tarihi alanları
+  artık boş metni açıkça `null`'a çeviriyor. `Number('')` = 0 olduğu için
+  doğum yılı `min(1900)` doğrulamasını patlatıyordu; bu da düzeltildi.
+- **Hata eşlemesi genişletildi** (`errorHandler.ts`): `P2000` (değer çok
+  uzun), `P2011` (zorunlu alan null — **en yaygın nedeni migration'ın
+  çalıştırılmamış olması**) ve `PrismaClientValidationError` artık 500
+  yerine ne yapılacağını söyleyen 422 döndürüyor. Tanınmayan Prisma
+  kodları da yanıtta görünüyor.
+
+> Kişi eklerken hâlâ hata alıyorsanız ilk bakılacak yer budur:
+> `Contact.companyId` şemada nullable ama veritabanında hâlâ `NOT NULL`
+> ise migration çalıştırılmamış demektir.
+
+### Fırsat kartları
+
+`hover` artık **yalnızca** kenarlık rengi ve gölge değiştiriyor;
+`transform: translateY()` kaldırıldı. Transform her kartta düzen yeniden
+hesabı tetikliyor, dolu bir sütunda fare gezdirirken gözle görülür takılma
+yaratıyordu.
+
+Kart eylemleri (Teklif Oluştur, Düzenle, Aşama, Sil) üç nokta menüsüne
+alındı ve menü düğmesi yalnızca kart üzerine gelince beliriyor.
+
+### Teklif kârlılığı
+
+Ana raporlama artık **teklifin kendi para biriminde**:
+`Kâr Oranı (%) = ((Satış − Maliyet) / Satış) × 100`, KDV hariç net satış
+üzerinden. Zorunlu TL çevrimi kaldırıldı — kur oynadıkça aynı teklifin
+kârı değişiyormuş gibi görünüyordu. Maliyet farklı bir dövizdeyse teklifin
+para birimine çevrilir. TL karşılığı tooltip ve alt satırda ikincil bilgi
+olarak duruyor.
+
+Teklif artık **kişiye de kesilebilir**: `Offer.companyId` nullable oldu,
+kurum ve kişiden en az birinin dolu olması sunucuda `superRefine` ile
+doğrulanıyor.
+
+### Otomatik taslak kaydı
+
+`useDraftAutosave` yeniden yazıldı. Taslak **otomatik uygulanmaz**:
+kullanıcı yeni kayıt açtığını sanarken eski bir taslağın alanlarıyla
+karşılaşırsa fark etmeyip yanlış veriyi kaydedebilir. Bunun yerine form
+temiz açılır ve üstte bir bildirim çıkar:
+
+> Kaydedilmemiş bir taslağınız bulundu · **[Taslağı Yükle]** **[Temizle]**
+
+Bağlı formlar: Teklif, Sözleşme, İhale, Şirket, E-posta. Kayıt başarılı
+olduğunda taslak silinir.
+
+### Giriş ekranı gecikmesi
+
+Kök neden Google Fonts `<link rel="stylesheet">` etiketiydi: render
+**engelleyici** bir istek. Kapalı veya yavaş ağda tarayıcı zaman aşımını
+bekliyor, giriş ekranı saniyelerce boş kalıyordu. Çözüm `media="print"` +
+`onload="this.media='all'"`: sayfa anında sistem fontuyla açılır, fontlar
+gelince sessizce geçiş yapar. `<noscript>` yedeği korundu.
+
+Ayrıca yıldız filigranının köşe hesabı modül düzeyine alındı (her
+render'da yeniden hesaplanıyordu).
+
+### Dosya boyutu sınırı
+
+Yapay 7 MB sınırı 100 MB'a çıkarıldı (istemci + sunucu). Express gövde
+sınırı 140 MB yapıldı: base64 ham boyutu ~%33 şişirir, 100 MB'lık dosya
+~134 MB gövde demektir. Sınır tamamen kaldırılmadı çünkü çok büyük bir
+dosyayı base64'e çevirmek tarayıcı sekmesini kilitler — kullanıcıya
+yüklemeden **önce** söylemek daha iyidir.
+
+### Palet ve konteyner hesaplayıcısı
+
+`PalletCalculator.tsx` — mühimmat hesaplayıcısından ayrı tutuldu çünkü
+girdi türü ve kullanıcı kitlesi farklı (biri kalibre + fişek adedi, diğeri
+ham koli ölçüsü).
+
+Palet tipleri: Euro Palet EPAL 1 (1200×800, 1500 kg), NATO Standart
+(1200×1000, 2000 kg), Sanayi (1200×1200, 1800 kg), Özel ölçü.
+
+Hesap üç kısıtı birlikte gözetir ve **en büyüğünü** alır: palet zemin
+alanı, ağırlık, hacim. Kat sayısı hem yükseklikle hem **palet taşıma
+kapasitesiyle** sınırlanır — yığın fiziksel olarak mümkün olsa bile
+kapasite aşılırsa taşınamaz. Koli iki yönelimde de denenir ve verimli
+olan seçilir. Çıktı kopyalanabilir ve kurumsal antetli A4 olarak
+yazdırılabilir.
+
+### Renk paleti yumuşatma
+
+| Önce | Sonra | Neden |
+| --- | --- | --- |
+| `#0A192F` | `#0F172A` | Beyaz kartla kontrast göz yoruyordu |
+| `#E31E24` | `#DC2626` | Saf kırmızı lacivert üzerinde titreşiyordu |
+| `#F4F7F9` | `#F8FAFC` | Daha dingin sayfa zemini |
+
+Kartlara ince `#e2e8f0` kenarlık geri geldi: gölge tek başına açık zeminde
+kartın sınırını belirsiz bırakıyordu. Üst bardaki kırmızı+altın çift şerit
+tek ince altına indirildi — iki güçlü renk yan yana "uyarı çubuğu" gibi
+okunuyordu.
+
+### Isı haritası
+
+Renk skalası çiğ sarı-kırmızıdan kurumsal skalaya çekildi:
+`#0f2042 → #1e408c → #2563eb → #d99828 → #f59e0b`. Yarıçap 34→30 px,
+azami opaklık %82→%55, bulanıklık 22→30. Altındaki coğrafya artık okunuyor.
+
+### Harita filtre paneli
+
+Katlanabilir: ok düğmesine basılınca 46 px'lik dikey şeride küçülür,
+`transition: 0.3s` ile açılır. Tercih `localStorage`'da saklanır. Panel
+`z-index: 1000` katmanında.
+
+### İnce scrollbar
+
+4 px genişlikte, saydam arka planlı, yuvarlatılmış. Firefox
+`scrollbar-width: thin` ile, WebKit sözde elemanlarla; ikisi de
+desteklenmiyorsa tarayıcı kendi çubuğunu gösterir ve hiçbir şey kırılmaz.
+Tablo, menü, çekmece, modal, Kanban sütunu ve not listelerine uygulandı.
+
+### Not renkleri
+
+Çiğ pembe, mor ve kırmızı kaldırıldı. Kalan dört ton: soft mavi `#E0F2FE`,
+soft sarı `#FEF9C3`, soft sage `#DCFCE7`, yumuşak gri `#F1F5F9`. Kırmızı
+notun "hata" gibi okunması sorunu da böylece ortadan kalktı.
+
+### AI çıktısı
+
+Kuru paragraf yerine yapılandırılmış bloklar: numaralı aksiyon adımları
+(lacivert daire içinde sıra numarası) ve **tonuna göre renklenen** madde
+işaretleri — riskler kırmızı, fırsatlar yeşil, bekleyenler sarı. Ton
+anahtar kelimeden çıkarılır ve tanınmayan satır **nötr bırakılır**; yanlış
+renklendirmektense renksiz bırakmak yeğdir.
+
+AI sayfası `max-width: 1280px` ile tam genişlikte, dört sekmeli:
+AI Asistan · Mühimmat & Sandık · Palet & Konteyner.

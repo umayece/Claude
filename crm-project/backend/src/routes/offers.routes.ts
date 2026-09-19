@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
@@ -38,8 +38,19 @@ const itemSchema = z.object({
 
 const offerBodySchema = z.object({
   title: z.string().trim().min(2).max(300),
-  companyId: z.string().uuid(),
-  contactId: z.string().uuid().nullish(),
+  /**
+   * Kurum ZORUNLU DEĞİL: bağımsız danışman, aracı veya komisyoncuya
+   * doğrudan teklif verilebilir. En az birinin (kurum ya da kişi) dolu
+   * olması `superRefine` ile doğrulanır.
+   */
+  companyId: z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.string().uuid().nullable(),
+  ).optional(),
+  contactId: z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.string().uuid().nullable(),
+  ).optional(),
   dealId: z.string().uuid().nullish(),
   offerNumber: z.string().trim().max(60).optional(),
   status: z.enum(OFFER_STATUSES).default('Taslak'),
@@ -54,6 +65,29 @@ const offerBodySchema = z.object({
   terms: z.string().max(50_000).nullish(),
   items: z.array(itemSchema).max(200).default([]),
 });
+
+/**
+ * Teklif havada duramaz: ya bir kuruma ya bir kişiye kesilmelidir.
+ *
+ * Kural `superRefine` olarak AYRI uygulanır; şemaya doğrudan zincirlenseydi
+ * ortaya çıkan `ZodEffects` `.partial()` desteklemez ve kısmi güncelleme
+ * (PUT) şeması kurulamazdı.
+ */
+function checkOfferTarget(
+  value: { companyId?: string | null; contactId?: string | null },
+  ctx: z.RefinementCtx,
+): void {
+  if (!value.companyId && !value.contactId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Teklif bir kuruma veya bir kişiye kesilmelidir.',
+      path: ['companyId'],
+    });
+  }
+}
+
+const offerCreateSchema = offerBodySchema.superRefine(checkOfferTarget);
+const offerUpdateSchema = offerBodySchema.partial();
 
 const listQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -71,6 +105,24 @@ const offerInclude = {
   contact: { select: { id: true, firstName: true, lastName: true } },
   deal: { select: { id: true, title: true, stage: true } },
 } satisfies Prisma.OfferInclude;
+
+/**
+ * Kişiye erişimi doğrular.
+ *
+ * Bağımsız kişi hiçbir departmana ait değildir; kurum kapsamı ona
+ * uygulanamaz. Kuruma bağlı kişide kurum kapsamı geçerlidir.
+ */
+async function assertContactAccess(user: Request['user'], contactId: string): Promise<void> {
+  const contact = await prisma.contact.findFirst({
+    where: {
+      id: contactId,
+      deletedAt: null,
+      OR: [{ companyId: null }, { company: companyScope(user) }],
+    },
+    select: { id: true },
+  });
+  if (!contact) throw NotFound('Kişi bulunamadı.');
+}
 
 /** Satır ve toplam hesabı yalnızca sunucuda yapılır — istemciden gelen toplam kabul edilmez. */
 function computeTotals(items: z.infer<typeof itemSchema>[]) {
@@ -100,27 +152,48 @@ function computeTotals(items: z.infer<typeof itemSchema>[]) {
 /**
  * Brüt kâr ve marj.
  *
- * Maliyet farklı bir para biriminde olabileceği için karşılaştırma ANLIK
- * kurla TL'ye çevrilerek yapılır — iki farklı birimi doğrudan çıkarmak
- * sessiz ve büyük bir hata olurdu. KDV hariç net satış esas alınır:
- * KDV devlete aittir, kâr değildir.
+ * ANA RAPORLAMA TEKLİFİN KENDİ PARA BİRİMİNDEDİR. Teklif USD açıldıysa
+ * kâr da USD gösterilir; zorunlu TL çevrimi ihracat ekibinin kafasını
+ * karıştırıyordu ve kur oynadıkça aynı teklifin kârı değişiyormuş gibi
+ * görünüyordu.
+ *
+ * Maliyet farklı bir para biriminde olabilir (hammadde USD, teklif EUR).
+ * Bu durumda maliyet anlık kurla teklifin para birimine çevrilir — iki
+ * farklı birimi doğrudan çıkarmak sessiz ve büyük bir hata olurdu.
+ *
+ * Formül: Kâr Oranı (%) = ((Satış - Maliyet) / Satış) * 100
+ * KDV hariç net satış esas alınır: KDV devlete aittir, kâr değildir.
+ *
+ * TL karşılığı ayrıca döner (`grossProfitTry`) ama ikincil bilgidir.
  */
 function computeMargin(
   subtotal: number, currency: string,
   costTotal: number, costCurrency: string,
   rates: RateMap,
 ) {
-  const revenueTry = toTryAt(subtotal, currency, rates);
-  const costTry = toTryAt(costTotal, costCurrency, rates);
-  const grossProfitTry = Math.round((revenueTry - costTry) * 100) / 100;
+  // Maliyeti teklifin para birimine çevir: önce TL'ye, sonra hedefe.
+  const costInOfferCurrency = costCurrency === currency
+    ? costTotal
+    : toTryAt(costTotal, costCurrency, rates) / (rates[currency as never] ?? 1);
+
+  const grossProfit = Math.round((subtotal - costInOfferCurrency) * 100) / 100;
+
   return {
-    revenueTry: Math.round(revenueTry * 100) / 100,
-    costTry: Math.round(costTry * 100) / 100,
-    grossProfitTry,
+    /** Teklifin para birimi — arayüz bu simgeyi kullanır. */
+    currency,
+    revenue: Math.round(subtotal * 100) / 100,
+    cost: Math.round(costInOfferCurrency * 100) / 100,
+    grossProfit,
     // Ciro sıfırken marj tanımsızdır; 0 döndürmek "sıfır kâr" yanılgısı yaratır.
-    marginPercent: revenueTry > 0
-      ? Math.round((grossProfitTry / revenueTry) * 1000) / 10
+    marginPercent: subtotal > 0
+      ? Math.round((grossProfit / subtotal) * 1000) / 10
       : null,
+    // İkincil: TL karşılığı. Ana rapor teklifin dövizinde kalır.
+    revenueTry: Math.round(toTryAt(subtotal, currency, rates) * 100) / 100,
+    costTry: Math.round(toTryAt(costTotal, costCurrency, rates) * 100) / 100,
+    grossProfitTry: Math.round(
+      (toTryAt(subtotal, currency, rates) - toTryAt(costTotal, costCurrency, rates)) * 100,
+    ) / 100,
   };
 }
 
@@ -202,18 +275,20 @@ router.get(
 router.post(
   '/',
   requirePermission('offer:write'),
-  validate(offerBodySchema),
+  validate(offerCreateSchema),
   auditAction('OFFER_CREATE', 'Offer'),
   asyncHandler(async (req, res) => {
-    const body = req.body as z.infer<typeof offerBodySchema>;
-    await assertCompanyAccess(req.user, body.companyId);
+    const body = req.body as z.infer<typeof offerCreateSchema>;
+    // Kurum verildiyse erişim doğrulanır; verilmediyse teklif kişiye kesilir.
+    if (body.companyId) await assertCompanyAccess(req.user, body.companyId);
+    if (body.contactId) await assertContactAccess(req.user, body.contactId);
 
     const totals = computeTotals(body.items);
     const offer = await prisma.offer.create({
       data: {
         offerNumber: body.offerNumber || (await nextSequence('TKL')),
         title: body.title,
-        companyId: body.companyId,
+        companyId: body.companyId ?? null,
         contactId: body.contactId ?? null,
         dealId: body.dealId ?? null,
         status: body.status,
@@ -266,7 +341,7 @@ router.post(
 router.put(
   '/:id',
   requirePermission('offer:write'),
-  validate(offerBodySchema.partial()),
+  validate(offerUpdateSchema),
   auditAction('OFFER_UPDATE', 'Offer'),
   asyncHandler(async (req, res) => {
     const id = String(req.params.id);

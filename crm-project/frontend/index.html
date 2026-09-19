@@ -8,16 +8,31 @@
 
     <!--
       Kurumsal tipografi: başlık/metrik için Barlow Condensed, gövde için Inter.
-      `preconnect` ilk yükte el sıkışmayı öne alır. Kapalı ağda bu istek
-      sessizce başarısız olur ve CSS'teki sistem fontu zinciri devreye girer —
-      arayüz bozulmaz.
+
+      ÖNEMLİ — RENDER ENGELLEME: Normal bir `rel="stylesheet"` etiketi ilk
+      boyamayı BLOKLAR. Kapalı veya yavaş ağda tarayıcı bu isteğin zaman
+      aşımına uğramasını bekler ve giriş ekranı saniyelerce boş kalır.
+
+      `media="print"` ile indirilen stil sayfası boyamayı engellemez;
+      `onload` içinde `media="all"` yapılınca fontlar geldiği anda devreye
+      girer. Böylece sayfa ANINDA sistem fontuyla açılır, font yüklenince
+      sessizce geçiş yapar. JavaScript kapalıysa `<noscript>` yedeği eski
+      davranışa döner.
     -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'; this.onload=null;"
       href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      />
+    </noscript>
     <title>MKE CRM</title>
   </head>
   <body>

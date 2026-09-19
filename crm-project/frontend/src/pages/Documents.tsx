@@ -42,8 +42,16 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CLASSIFICATIONS = ['Tasnif Dışı', 'Hizmete Özel', 'Gizli'] as const;
 
-// Sunucu 7 MB'ı reddeder; kullanıcıyı yüklemeden önce uyarırız.
-const MAX_BYTES = 7 * 1024 * 1024;
+// Sunucu sınırı 100 MB; kullanıcıyı yüklemeden önce uyarırız.
+/**
+ * İstemci tarafı üst sınır.
+ *
+ * Yapay 7 MB sınırı kullanıcıyı engelliyordu; artık sunucu sınırıyla
+ * (100 MB) aynı. Kontrol tamamen kaldırılmadı çünkü 500 MB'lık bir
+ * dosyayı base64'e çevirmek tarayıcı sekmesini kilitler — kullanıcıya
+ * yüklemeden önce söylemek daha iyidir.
+ */
+const MAX_BYTES = 100 * 1024 * 1024;
 
 function classificationClass(value: string): string {
   if (value === 'Gizli') return 'classification-badge cls-secret';

@@ -21,7 +21,7 @@ import type {
 } from '../types';
 
 const CURRENCIES: CurrencyCode[] = ['USD', 'TRY', 'EUR', 'GBP'];
-const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 /** Etkinlik türünün okunabilir adı. */
 function kindLabel(kind: ActivityKind): string {
@@ -411,7 +411,7 @@ export function Activities() {
   const uploadReport = async (file: File): Promise<void> => {
     if (!detail) return;
     if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError('Dosya 7 MB sınırını aşıyor.');
+      setUploadError('Dosya 100 MB sınırını aşıyor.');
       return;
     }
     setUploadError(null);
@@ -926,7 +926,7 @@ export function Activities() {
               {can('document:write') && (
                 <label className="dropzone mb-3" style={{ display: 'block' }}>
                   <IconUpload size={20} />
-                  <div className="mt-2">PDF veya Word dosyası seçin (en fazla 7 MB)</div>
+                  <div className="mt-2">PDF veya Word dosyası seçin (en fazla 100 MB)</div>
                   <input
                     type="file"
                     style={{ display: 'none' }}
